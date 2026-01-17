@@ -25,7 +25,7 @@ function toggleXTSlabMixture(slabId) {
             mixtureDiv.id = 'xt_slab_mixture_' + slabId;
             mixtureDiv.className = 'custom-gas-section';
             mixtureDiv.style.marginTop = '10px';
-            mixtureDiv.style.marginLeft = '20px';
+            mixtureDiv.style.gridColumn = '1 / -1'; // Span all columns
             
             var slabItem = document.getElementById('xt_slab_item_' + slabId);
             slabItem.appendChild(mixtureDiv);
@@ -102,10 +102,10 @@ function renderXTMixtureInputs(slabId) {
     // Render each component
     for (var i = 0; i < components.length; i++) {
         var comp = components[i];
-        html += '<div class="mixture-component" style="margin-bottom: 8px;">';
+        html += '<div class="mixture-component" style="display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; margin-bottom: 8px;">';
         html += '<select id="xt_mix_gas_' + slabId + '_' + comp.id + '" ';
         html += 'onchange="updateXTMixtureComponent(' + slabId + ', ' + comp.id + ', \'gasId\', this.value)" ';
-        html += 'style="min-width: 150px; margin-right: 8px;">';
+        html += 'style="min-width: 150px;">';
         html += '<option value="">Select Gas</option>';
         
         // Add all available gases
@@ -123,13 +123,13 @@ function renderXTMixtureInputs(slabId) {
         }
         
         html += '</select>';
-        html += '<span style="font-size: 13px;">Mole Fraction: </span>';
+        html += '<span style="font-size: 13px; white-space: nowrap;">Mole Fraction:</span>';
         html += '<input type="number" id="xt_mix_frac_' + slabId + '_' + comp.id + '" ';
         html += 'value="' + (comp.fraction || 0) + '" ';
         html += 'onchange="updateXTMixtureComponent(' + slabId + ', ' + comp.id + ', \'fraction\', parseFloat(this.value))" ';
-        html += 'step="0.01" min="0" max="1" style="width: 80px; margin-right: 8px;">';
+        html += 'step="0.01" min="0" max="1" style="width: 80px;">';
         html += '<button type="button" onclick="removeXTMixtureComponent(' + slabId + ', ' + comp.id + ')" ';
-        html += 'style="padding: 4px 10px; font-size: 12px;">Remove</button>';
+        html += 'style="padding: 4px 10px; font-size: 12px; white-space: nowrap;">Remove</button>';
         html += '</div>';
     }
     

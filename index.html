@@ -2306,6 +2306,7 @@ var xtSlabMixtures = {}; // Store mixture compositions for slabs with custom mix
 var xtSolver = null;
 var xtVisualization = null;
 var xtResults = null;
+var xtSuppressRender = false; // Flag to suppress rendering during batch operations
 
 // Toggle X-T Diagram section
 function toggleXTDiagramSection() {
@@ -2352,6 +2353,10 @@ function useCurrentCalculation() {
     // Clear existing slabs
     xtSlabs = [];
     xtSlabCounter = 0;
+    xtSlabMixtures = {}; // Clear mixture data
+    
+    // Suppress rendering during batch import
+    xtSuppressRender = true;
     
     // Get driver gas info
     var driverGasId = document.Shock.drivergas.value;
@@ -2363,14 +2368,66 @@ function useCurrentCalculation() {
     var drivenP = parseFloat(document.Shock.pinit.value);
     var drivenT = parseFloat(document.Shock.tinit.value);
     
-    // Add slabs (driver first, then driven)
-    addXTSlab({ gas: driverGasId, pressure: driverP, temperature: driverT, length: 3 });
-    addXTSlab({ gas: drivenGasId, pressure: drivenP, temperature: drivenT, length: 6 });
+    // Add driver slab
+    if (driverGasId === 'custom') {
+        // Import driver custom mixture - capture ID AFTER adding slab
+        addXTSlab({ gas: 'custom_mixture', pressure: driverP, temperature: driverT, length: 3 });
+        var driverSlabId = xtSlabs[xtSlabs.length - 1].id;
+        
+        // Copy mixture composition from shock tube calculator
+        xtSlabMixtures[driverSlabId] = [];
+        for (var i = 0; i < mixtures.driver.length; i++) {
+            var index = mixtures.driver[i];
+            var gasSelect = document.getElementById('driver_gas_' + index);
+            var fracInput = document.getElementById('driver_frac_' + index);
+            
+            if (gasSelect && fracInput && gasSelect.value) {
+                var compId = xtMixtureComponentCounter++;
+                xtSlabMixtures[driverSlabId].push({
+                    id: compId,
+                    gasId: gasSelect.value,
+                    fraction: parseFloat(fracInput.value)
+                });
+            }
+        }
+    } else {
+        addXTSlab({ gas: driverGasId, pressure: driverP, temperature: driverT, length: 3 });
+    }
+    
+    // Add driven slab
+    if (drivenGasId === 'custom') {
+        // Import driven custom mixture - capture ID AFTER adding slab
+        addXTSlab({ gas: 'custom_mixture', pressure: drivenP, temperature: drivenT, length: 6 });
+        var drivenSlabId = xtSlabs[xtSlabs.length - 1].id;
+        
+        // Copy mixture composition from shock tube calculator
+        xtSlabMixtures[drivenSlabId] = [];
+        for (var i = 0; i < mixtures.driven.length; i++) {
+            var index = mixtures.driven[i];
+            var gasSelect = document.getElementById('driven_gas_' + index);
+            var fracInput = document.getElementById('driven_frac_' + index);
+            
+            if (gasSelect && fracInput && gasSelect.value) {
+                var compId = xtMixtureComponentCounter++;
+                xtSlabMixtures[drivenSlabId].push({
+                    id: compId,
+                    gasId: gasSelect.value,
+                    fraction: parseFloat(fracInput.value)
+                });
+            }
+        }
+    } else {
+        addXTSlab({ gas: drivenGasId, pressure: drivenP, temperature: drivenT, length: 6 });
+    }
+    
+    // Re-enable rendering and render once with all data ready
+    xtSuppressRender = false;
+    renderXTSlabs();
     
     // Show import info
-    var driverGas = getAllGases()[driverGasId];
-    var drivenGas = getAllGases()[drivenGasId];
-    var info = '✓ Imported: ' + driverGas.name + ' (driver) + ' + drivenGas.name + ' (driven)';
+    var driverDesc = driverGasId === 'custom' ? 'Custom Mixture' : getAllGases()[driverGasId].name;
+    var drivenDesc = drivenGasId === 'custom' ? 'Custom Mixture' : getAllGases()[drivenGasId].name;
+    var info = '✓ Imported: ' + driverDesc + ' (driver) + ' + drivenDesc + ' (driven)';
     document.getElementById('xtImportInfo').textContent = info;
 }
 
@@ -2386,7 +2443,11 @@ function addXTSlab(config = {}) {
     };
     
     xtSlabs.push(slab);
-    renderXTSlabs();
+    
+    // Only render if not suppressed (during batch operations)
+    if (!xtSuppressRender) {
+        renderXTSlabs();
+    }
 }
 
 // Remove a slab
@@ -2506,6 +2567,15 @@ function renderXTSlabs() {
     }
     
     container.innerHTML = html;
+    
+    // Explicitly set dropdown values after HTML render (more reliable than selected attribute)
+    for (var i = 0; i < xtSlabs.length; i++) {
+        var slab = xtSlabs[i];
+        var select = document.getElementById('xt_slab_gas_' + slab.id);
+        if (select) {
+            select.value = slab.gas;
+        }
+    }
     
     // Re-initialize mixture UIs for slabs that have custom mixture selected
     for (var i = 0; i < xtSlabs.length; i++) {
