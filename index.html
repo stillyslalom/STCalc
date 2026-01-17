@@ -6,6 +6,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@400;600;700&display=swap" rel="stylesheet">
 <link href="WiSTL%20Gas%20Dynamics%20Calculator_files/web.css" rel="stylesheet" type="text/css">
+<!-- <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script> -->
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 <style type="text/css">
 body {
     font-family: 'Source Sans Pro', Arial, sans-serif;
@@ -37,6 +39,70 @@ h3 {
 }
 table {
     margin-top: 10px;
+}
+/* Modal styles */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0,0,0,0.6);
+}
+.modal-content {
+    background-color: #fefefe;
+    margin: 3% auto;
+    padding: 30px;
+    border: 1px solid #888;
+    width: 90%;
+    max-width: 800px;
+    max-height: 85vh;
+    overflow-y: auto;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+}
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid #990000;
+}
+.modal-header h2 {
+    margin: 0;
+    color: #990000;
+}
+.close {
+    color: #aaa;
+    font-size: 32px;
+    font-weight: bold;
+    cursor: pointer;
+    line-height: 1;
+    transition: color 0.3s;
+}
+.close:hover,
+.close:focus {
+    color: #000;
+}
+.equation-section {
+    margin-bottom: 25px;
+}
+.equation-section h3 {
+    color: #990000;
+    margin-top: 20px;
+    margin-bottom: 10px;
+}
+.equation-note {
+    font-style: italic;
+    color: #666;
+    margin-top: 20px;
+    padding: 10px;
+    background-color: #f5f5f5;
+    border-left: 3px solid #990000;
 }
 </style>
 </head>
@@ -971,19 +1037,37 @@ function addGasToMixture(type) {
     defineOption.text = '--- Define New Gas... ---';
     select.appendChild(defineOption);
     
+    // Collect all gases and sort alphabetically
+    var allGasOptions = [];
+    
     // Add predefined gases
     for (var gasId in gasDatabase) {
-        var option = document.createElement('option');
-        option.value = gasId;
-        option.text = gasDatabase[gasId].name;
-        select.appendChild(option);
+        allGasOptions.push({
+            value: gasId,
+            text: gasDatabase[gasId].name,
+            sortKey: gasDatabase[gasId].name
+        });
     }
     
     // Add custom gases (with special marker)
     for (var gasId in customGases) {
+        allGasOptions.push({
+            value: gasId,
+            text: '\u2605 ' + customGases[gasId].name,
+            sortKey: customGases[gasId].name
+        });
+    }
+    
+    // Sort alphabetically by name
+    allGasOptions.sort(function(a, b) {
+        return a.sortKey.localeCompare(b.sortKey);
+    });
+    
+    // Add sorted options to select
+    for (var i = 0; i < allGasOptions.length; i++) {
         var option = document.createElement('option');
-        option.value = gasId;
-        option.text = '\u2605 ' + customGases[gasId].name; // ★ star symbol
+        option.value = allGasOptions[i].value;
+        option.text = allGasOptions[i].text;
         select.appendChild(option);
     }
     
@@ -1308,16 +1392,15 @@ function calculateMixtureProperties(type) {
 <h3>Input</h3>
 <select name="drivengas" onchange="toggleMixtureInputs('driven')">
   <option value="">Select a Driven Gas</option>
+  <option value="custom">Custom Mixture</option>
   <option value="1" selected="selected">Air</option> 
   <option value="2">Argon</option> 
   <option value="3">Carbon Dioxide</option>
   <option value="4">Helium</option> 
   <option value="5">Neon</option>
   <option value="6">Nitrogen</option> 
-  <option value="7">Xenon</option>
   <option value="8">Sulfur Hexafluoride</option>
-  <option value="9">Mix: He/Ar 50/50</option>
-  <option value="custom">Custom Mixture</option>
+  <option value="7">Xenon</option>
 </select>  Driven Gas <br>
 <div id="driven_mixture_div" style="display:none; margin-left:20px; background-color:#F1EFF7; padding:10px; margin-top:5px; margin-bottom:5px; border:1px solid #CDD1E2;">
   <b>Custom Mixture (Mole Fractions):</b><br>
@@ -1329,15 +1412,17 @@ function calculateMixtureProperties(type) {
 <input maxlength="9" name="pinit" size="9" value="101325"> Pa, Initial Pressure, Driven Section <br>
 <input maxlength="9" name="tinit" size="9" value="300"> K, Initial Temperature, Driven Section <br>
 
-<select name="drivergas" onchange="toggleMixtureInputs('driver')"> <option value="4">Helium</option> 
+<select name="drivergas" onchange="toggleMixtureInputs('driver')">
+  <option value="">Select a Driver Gas</option>
+  <option value="custom">Custom Mixture</option>
   <option value="1" selected="selected">Air</option> 
   <option value="2">Argon</option> 
   <option value="3">Carbon Dioxide</option>
+  <option value="4">Helium</option>
   <option value="5">Neon</option>
   <option value="6">Nitrogen</option> 
-  <option value="7">Xenon</option>
   <option value="8">Sulfur Hexafluoride</option>
-  <option value="custom">Custom Mixture</option>
+  <option value="7">Xenon</option>
 </select> Driver Gas <br>
 <div id="driver_mixture_div" style="display:none; margin-left:20px; background-color:#F1EFF7; padding:10px; margin-top:5px; margin-bottom:5px; border:1px solid #CDD1E2;">
   <b>Custom Mixture (Mole Fractions):</b><br>
@@ -1454,7 +1539,7 @@ function calculateMixtureProperties(type) {
 
 <input maxlength="9" name="pfourpsig" size="9" value="73.54339557717464"> psig
 
-<br><a href="#" onclick="alert('Equations documentation placeholder'); return false;">View Equations</a>
+<br><a href="#" onclick="showEquationsModal(); return false;">View Equations</a>
 
 </small>
 
@@ -1529,5 +1614,98 @@ Output<br>
 <footer style="text-align:center; margin-top:40px; padding:20px; border-top:1px solid #ddd; color:#666; font-size:small;">
 Last updated Jan. 16, 2026 by Alex Ames; original calculator by Jason Oakley. Submit issues & feature requests on <a href="https://github.com/stillyslalom/STCalc" target="_blank">GitHub</a>.
 </footer>
+
+<!-- Equations Modal -->
+<div id="equationsModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>Gasdynamic Equations for a Shock Wave</h2>
+      <span class="close" onclick="closeEquationsModal()">&times;</span>
+    </div>
+    
+    <div class="equation-section">
+      <h3>List of Variables</h3>
+      <p>
+        \(a \equiv \text{speed of sound}\)<br>
+        \(M \equiv \text{Mach number}\)<br>
+        \(p \equiv \text{pressure}\)<br>
+        \(T \equiv \text{temperature}\)<br>
+        \(u_2 \equiv \text{particle velocity}\)<br>
+        \(W \equiv \text{speed of wave}\)<br>
+        \(\gamma \equiv \text{specific heat ratio}\)<br>
+        \(\rho \equiv \text{density}\)
+      </p>
+    </div>
+
+    <div class="equation-section">
+      <h3>Basic Relationships</h3>
+      <p>$$M \equiv \frac{W}{a}$$</p>
+    </div>
+
+    <div class="equation-section">
+      <h3>Jump Relations Across Shock (State 2 - Shocked)</h3>
+      
+      <p><strong>Pressure Ratio:</strong></p>
+      <p>$$\frac{p_2}{p_1} = 1 + \frac{2\gamma}{\gamma+1}\left(M^2-1\right)$$</p>
+      
+      <p><strong>Temperature Ratio:</strong></p>
+      <p>$$\frac{T_2}{T_1} = \frac{p_2}{p_1}\left(\frac{\frac{\gamma+1}{\gamma-1}+\frac{p_2}{p_1}}{1+\frac{\gamma+1}{\gamma-1}\left[\frac{p_2}{p_1}\right]}\right)$$</p>
+      
+      <p><strong>Density Ratio:</strong></p>
+      <p>$$\frac{\rho_2}{\rho_1} = \frac{1+\frac{\gamma+1}{\gamma-1}\left(\frac{p_2}{p_1}\right)}{\frac{\gamma+1}{\gamma-1}+\frac{p_2}{p_1}}$$</p>
+      
+      <p><strong>Particle Velocity:</strong></p>
+      <p>$$u_2 = \frac{a_1}{\gamma}\left(\frac{p_2}{p_1}-1\right)\left(\frac{\frac{2\gamma}{\gamma+1}}{\frac{p_2}{p_1}+\frac{\gamma-1}{\gamma+1}}\right)^{1/2}$$</p>
+    </div>
+
+    <div class="equation-section">
+      <h3>Reflected Wave Properties (State 5)</h3>
+      
+      <p><strong>Pressure Ratio:</strong></p>
+      <p>$$\frac{p_5}{p_2} = \frac{(3\gamma-1)\frac{p_2}{p_1}-(\gamma-1)}{(\gamma-1)\frac{p_2}{p_1}+(\gamma+1)}$$</p>
+      
+      <p><strong>Temperature Ratio:</strong></p>
+      <p>$$\frac{T_5}{T_2} = \frac{p_5}{p_2}\left(\frac{\frac{\gamma+1}{\gamma-1}+\frac{p_5}{p_2}}{1+\frac{\gamma+1}{\gamma-1}\left[\frac{p_5}{p_2}\right]}\right)$$</p>
+      
+      <p><strong>Density Ratio:</strong></p>
+      <p>$$\frac{\rho_5}{\rho_2} = \frac{1+\frac{\gamma+1}{\gamma-1}\left(\frac{p_5}{p_2}\right)}{\frac{\gamma+1}{\gamma-1}+\frac{p_5}{p_2}}$$</p>
+      
+      <p><strong>Reflected Wave Speed and Mach Number:</strong></p>
+      <p>$$W_R = \frac{\rho_2 u_2}{\rho_5-\rho_2}$$</p>
+      <p>$$M_R = \frac{W_R+u_2}{a_2}$$</p>
+    </div>
+
+    <div class="equation-section">
+      <h3>Driver Section Properties (State 4)</h3>
+      <p>$$\frac{p_4}{p_1} = \frac{p_2}{p_1}\left(1-\frac{(\gamma_4-1)(a_1/a_4)(p_2/p_1-1)}{\sqrt{2\gamma_1\left[2\gamma_1+(\gamma_1+1)(p_2/p_1-1)\right]}}\right)^{-2\gamma_4/(\gamma_4-1)}$$</p>
+    </div>
+
+    <div class="equation-note">
+      <strong>Reference:</strong> Equations taken from <em>Modern Compressible Flow with Historical Perspective</em>, Anderson, 2nd ed.
+    </div>
+  </div>
+</div>
+
+<script>
+function showEquationsModal() {
+    document.getElementById('equationsModal').style.display = 'block';
+    // Trigger MathJax to render the equations
+    if (window.MathJax) {
+        MathJax.typesetPromise();
+    }
+}
+
+function closeEquationsModal() {
+    document.getElementById('equationsModal').style.display = 'none';
+}
+
+// Close modal when clicking outside of it
+window.onclick = function(event) {
+    var modal = document.getElementById('equationsModal');
+    if (event.target == modal) {
+        closeEquationsModal();
+    }
+}
+</script>
 
 </body></html>
