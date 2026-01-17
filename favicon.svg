@@ -1,0 +1,55 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <!-- Bright left fan: pink (high) -> orange/red -> deep purple -->
+    <radialGradient id="leftFan" cx="10%" cy="90%" r="85%">
+      <stop offset="0%"   stop-color="#ffd3ff"/>
+      <stop offset="22%"  stop-color="#ffb3ff"/>
+      <stop offset="45%"  stop-color="#ff6b3f"/>
+      <stop offset="68%"  stop-color="#b51f3a"/>
+      <stop offset="100%" stop-color="#2b0a56"/>
+    </radialGradient>
+
+    <!-- Central field: mostly purple with subtle variation like the colormap -->
+    <linearGradient id="midPurple" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="#2a0a52"/>
+      <stop offset="35%"  stop-color="#3a0f6a"/>
+      <stop offset="70%"  stop-color="#3c106f"/>
+      <stop offset="100%" stop-color="#2f0b5b"/>
+    </linearGradient>
+
+    <!-- Slight vertical shading to mimic the time gradient in the plot -->
+    <linearGradient id="timeShade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#000000" stop-opacity="0.10"/>
+      <stop offset="55%"  stop-color="#000000" stop-opacity="0.00"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.22"/>
+    </linearGradient>
+
+    <!-- Soft blend band near the diaphragm location -->
+    <linearGradient id="diaphragmBand" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="#ff6b3f" stop-opacity="0.0"/>
+      <stop offset="45%"  stop-color="#ff6b3f" stop-opacity="0.18"/>
+      <stop offset="55%"  stop-color="#ff6b3f" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#ff6b3f" stop-opacity="0.0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- No axes; full-bleed diagram field -->
+  <rect x="0" y="0" width="64" height="64" fill="#0b0513"/>
+
+  <!-- Left high-pressure wedge / expansion fan -->
+  <polygon points="0,64 0,0 24,0 24,64" fill="url(#leftFan)"/>
+
+  <!-- Central purple field -->
+  <polygon points="24,0 64,0 64,64 24,64" fill="url(#midPurple)"/>
+
+  <!-- Right low-pressure triangular region (black) -->
+  <polygon points="30,64 64,64 64,12" fill="#000000" opacity="0.92"/>
+
+  <!-- Subtle vertical (time) shading overlay -->
+  <rect x="0" y="0" width="64" height="64" fill="url(#timeShade)"/>
+
+
+  <!-- Diagonal shock/contact line -->
+  <line x1="24" y1="64" x2="44" y2="0" stroke="#ffffff" stroke-width="5" stroke-linecap="round"/>
+</svg>
