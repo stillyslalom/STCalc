@@ -260,7 +260,7 @@ function getXTSlabGasProperties(slab) {
         return {
             gamma: props.gamma,
             mw: props.mw,
-            gasName: names.join(', ')
+            gasName: names.join(' - ')
         };
     } else {
         // Single gas
