@@ -1,45 +1,227 @@
-<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN" "http://www.w3.org/TR/REC-html40/loose.dtd">
-<html><head>
+<!DOCTYPE html>
+<html lang="en">
+<head>
 <title>Shock Tube Calculator</title>
-<meta http-equiv="Content-Type" content="text/html; charset=windows-1252">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@400;600;700&display=swap" rel="stylesheet">
-<link href="WiSTL%20Gas%20Dynamics%20Calculator_files/web.css" rel="stylesheet" type="text/css">
-<!-- <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script> -->
+<link href="Shock%20Tube%20Calculator_files/web.css" rel="stylesheet" type="text/css">
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 <style type="text/css">
+/* Modern, clean styling */
+* {
+    box-sizing: border-box;
+}
+
 body {
     font-family: 'Source Sans Pro', Arial, sans-serif;
-    margin: 20px;
-    background-color: #f5f5f5;
+    margin: 0;
+    padding: 20px;
+    background-color: #f8f9fa;
+    color: #212529;
+    line-height: 1.5;
 }
+
 .container {
     max-width: 1200px;
     margin: 0 auto;
-    background-color: white;
-    padding: 30px;
-    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    background-color: #ffffff;
+    padding: 40px;
+    border-radius: 4px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
 }
+
 h1 {
-    color: #333;
-    border-bottom: 2px solid #990000;
-    padding-bottom: 10px;
+    color: #212529;
+    border-bottom: 3px solid #0066cc;
+    padding-bottom: 12px;
+    margin-top: 0;
+    margin-bottom: 30px;
+    font-size: 2em;
+    font-weight: 700;
 }
+
 h2 {
-    color: #333;
+    color: #212529;
+    margin-top: 30px;
+    margin-bottom: 20px;
+    font-size: 1.5em;
+    font-weight: 600;
+}
+
+h3 {
+    color: #495057;
     margin-top: 20px;
     margin-bottom: 15px;
-}
-h3 {
-    color: #333;
-    margin-top: 15px;
-    margin-bottom: 10px;
+    font-size: 1.2em;
+    font-weight: 600;
     clear: both;
 }
+
+hr {
+    border: none;
+    border-top: 1px solid #dee2e6;
+    margin: 30px 0;
+}
+
+/* Form elements */
+input[type="text"],
+input[type="number"],
+select {
+    padding: 6px 10px;
+    border: 1px solid #ced4da;
+    border-radius: 3px;
+    font-family: 'Source Sans Pro', Arial, sans-serif;
+    font-size: 14px;
+    background-color: #ffffff;
+    transition: border-color 0.15s;
+}
+
+input[type="text"]:focus,
+input[type="number"]:focus,
+select:focus {
+    outline: none;
+    border-color: #0066cc;
+}
+
+input[type="text"]:disabled,
+input[type="number"]:disabled {
+    background-color: #e9ecef;
+    cursor: not-allowed;
+}
+
+select {
+    cursor: pointer;
+    padding-right: 24px;
+}
+
+button,
+input[type="button"],
+input[type="reset"] {
+    padding: 8px 16px;
+    border: 1px solid #0066cc;
+    border-radius: 3px;
+    background-color: #0066cc;
+    color: #ffffff;
+    font-family: 'Source Sans Pro', Arial, sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.15s;
+}
+
+button:hover,
+input[type="button"]:hover,
+input[type="reset"]:hover {
+    background-color: #0052a3;
+}
+
+input[type="reset"] {
+    background-color: #6c757d;
+    border-color: #6c757d;
+    margin-left: 8px;
+}
+
+input[type="reset"]:hover {
+    background-color: #5a6268;
+}
+
+/* Table styling */
 table {
+    width: auto;
+    border-collapse: collapse;
+    margin-top: 15px;
+    margin-bottom: 15px;
+    font-size: 14px;
+}
+
+table td {
+    padding: 6px 8px;
+    border: 1px solid #dee2e6;
+    white-space: nowrap;
+}
+
+table tr:first-child td {
+    background-color: #f8f9fa;
+    font-weight: 600;
+    text-align: center;
+}
+
+table tr td:first-child {
+    font-weight: 600;
+    background-color: #f8f9fa;
+}
+
+table input {
+    width: 90px;
+    padding: 4px 6px;
+    font-size: 13px;
+}
+
+table td:last-child {
+    text-align: left;
+    font-size: 13px;
+    color: #6c757d;
+}
+
+/* Custom gas sections */
+.custom-gas-section {
+    background-color: #f8f9fa;
+    padding: 15px;
+    margin: 10px 0;
+    border: 1px solid #dee2e6;
+    border-radius: 3px;
+}
+
+.custom-gas-section h3 {
+    margin-top: 0;
+    font-size: 1em;
+}
+
+.mixture-component {
+    margin-bottom: 8px;
+}
+
+.mixture-component select {
+    min-width: 180px;
+    margin-right: 8px;
+}
+
+.mixture-component input {
+    width: 80px;
+    margin-right: 8px;
+}
+
+.mixture-component button {
+    padding: 6px 12px;
+    font-size: 13px;
+}
+
+.custom-gas-library {
+    background-color: #e7f3ff;
+    padding: 15px;
+    margin-bottom: 20px;
+    border: 1px solid #b3d9ff;
+    border-radius: 3px;
+}
+
+.custom-gas-library table {
+    font-size: 13px;
     margin-top: 10px;
 }
+
+.custom-gas-library table tr:first-child td {
+    background-color: #d1e8ff;
+    font-weight: 600;
+}
+
+.custom-gas-library button {
+    padding: 4px 10px;
+    font-size: 12px;
+}
+
 /* Modal styles */
 .modal {
     display: none;
@@ -50,59 +232,111 @@ table {
     width: 100%;
     height: 100%;
     overflow: auto;
-    background-color: rgba(0,0,0,0.6);
+    background-color: rgba(0,0,0,0.5);
 }
+
 .modal-content {
-    background-color: #fefefe;
+    background-color: #ffffff;
     margin: 3% auto;
     padding: 30px;
-    border: 1px solid #888;
+    border: 1px solid #dee2e6;
     width: 90%;
     max-width: 800px;
     max-height: 85vh;
     overflow-y: auto;
-    border-radius: 8px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    border-radius: 4px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
 }
+
 .modal-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
     margin-bottom: 20px;
     padding-bottom: 15px;
-    border-bottom: 2px solid #990000;
+    border-bottom: 2px solid #0066cc;
 }
+
 .modal-header h2 {
     margin: 0;
-    color: #990000;
+    color: #0066cc;
 }
+
 .close {
-    color: #aaa;
+    color: #6c757d;
     font-size: 32px;
     font-weight: bold;
     cursor: pointer;
     line-height: 1;
-    transition: color 0.3s;
+    transition: color 0.15s;
 }
+
 .close:hover,
 .close:focus {
-    color: #000;
+    color: #212529;
 }
+
 .equation-section {
     margin-bottom: 25px;
 }
+
 .equation-section h3 {
-    color: #990000;
+    color: #0066cc;
     margin-top: 20px;
     margin-bottom: 10px;
 }
+
 .equation-note {
     font-style: italic;
-    color: #666;
+    color: #6c757d;
     margin-top: 20px;
-    padding: 10px;
-    background-color: #f5f5f5;
-    border-left: 3px solid #990000;
+    padding: 12px;
+    background-color: #f8f9fa;
+    border-left: 3px solid #0066cc;
+}
+
+/* Footer */
+footer {
+    text-align: center;
+    margin-top: 40px;
+    padding-top: 20px;
+    border-top: 1px solid #dee2e6;
+    color: #6c757d;
+    font-size: 14px;
+}
+
+footer a {
+    color: #0066cc;
+    text-decoration: none;
+}
+
+footer a:hover {
+    text-decoration: underline;
+}
+
+/* Notes section */
+small {
+    color: #6c757d;
+    line-height: 1.6;
+}
+
+small a {
+    color: #0066cc;
+    text-decoration: none;
+}
+
+small a:hover {
+    text-decoration: underline;
+}
+
+/* Form layout helpers */
+.form-group {
+    margin-bottom: 12px;
+}
+
+.form-label {
+    display: inline-block;
+    margin-left: 8px;
 }
 </style>
 </head>
@@ -432,51 +666,51 @@ function calcShock() {
 
         mr=(wr+u2)/a2;
 
-        document.Shock.pdriv.value = p1/1e6;
+        document.Shock.pdriv.value = (p1/1e6).toPrecision(6);
 
-        document.Shock.tdriv.value = t1;
+        document.Shock.tdriv.value = t1.toPrecision(6);
 
-        document.Shock.ddriv.value = d1;
+        document.Shock.ddriv.value = d1.toPrecision(6);
 
-        document.Shock.adriv.value = a1;
+        document.Shock.adriv.value = a1.toPrecision(6);
 
-        document.Shock.pshocked.value = p2/1e6;
+        document.Shock.pshocked.value = (p2/1e6).toPrecision(6);
 
-        document.Shock.tshocked.value = t2;
+        document.Shock.tshocked.value = t2.toPrecision(6);
 
-        document.Shock.dshocked.value = d2;
+        document.Shock.dshocked.value = d2.toPrecision(6);
 
-        document.Shock.ashocked.value = a2;
+        document.Shock.ashocked.value = a2.toPrecision(6);
 
-        document.Shock.ushocked.value = u2;
+        document.Shock.ushocked.value = u2.toPrecision(6);
 
-        document.Shock.pfour.value = p4/1e6;
+        document.Shock.pfour.value = (p4/1e6).toPrecision(6);
 
-        document.Shock.pfourpsig.value = (((p4-101325.0)/101325.0)*14.696)/areafactor;
+        document.Shock.pfourpsig.value = ((((p4-101325.0)/101325.0)*14.696)/areafactor).toPrecision(6);
 
-        document.Shock.tfour.value = t4;
+        document.Shock.tfour.value = t4.toPrecision(6);
 
-        document.Shock.dfour.value = d4;
+        document.Shock.dfour.value = d4.toPrecision(6);
 
-        document.Shock.afour.value = a4;
+        document.Shock.afour.value = a4.toPrecision(6);
 
-        document.Shock.preflect.value = p5/1e6;
+        document.Shock.preflect.value = (p5/1e6).toPrecision(6);
 
-        document.Shock.treflect.value = t5;
+        document.Shock.treflect.value = t5.toPrecision(6);
 
-        document.Shock.dreflect.value = d5;
+        document.Shock.dreflect.value = d5.toPrecision(6);
 
-        document.Shock.areflect.value = a5;
+        document.Shock.areflect.value = a5.toPrecision(6);
 
-        document.Shock.wreflect.value = wr;
+        document.Shock.wreflect.value = wr.toPrecision(6);
 
-        document.Shock.mreflect.value = mr;
+        document.Shock.mreflect.value = mr.toPrecision(6);
 
-        document.Shock.wshocked.value = w;
+        document.Shock.wshocked.value = w.toPrecision(6);
 
-        document.Shock.outmw.value = mw;
+        document.Shock.outmw.value = mw.toPrecision(6);
 
-        document.Shock.outgamma.value = g;
+        document.Shock.outgamma.value = g.toPrecision(6);
 
         // Save calculator state to localStorage
         saveCalculatorState();
@@ -905,22 +1139,22 @@ function updateCustomGasList() {
     
     managementDiv.style.display = 'block';
     
-    var html = '<table style="border-collapse:collapse; font-size:small;">';
-    html += '<tr style="background-color:#ddd; font-weight:bold;">';
-    html += '<td style="padding:3px 8px; border:1px solid #999;">Gas Name</td>';
-    html += '<td style="padding:3px 8px; border:1px solid #999;">Gamma (\u03B3)</td>';
-    html += '<td style="padding:3px 8px; border:1px solid #999;">MW (g/mol)</td>';
-    html += '<td style="padding:3px 8px; border:1px solid #999;">Action</td>';
+    var html = '<table>';
+    html += '<tr>';
+    html += '<td>Gas Name</td>';
+    html += '<td>Gamma (γ)</td>';
+    html += '<td>MW (g/mol)</td>';
+    html += '<td>Action</td>';
     html += '</tr>';
     
     for (var id in customGases) {
         var gas = customGases[id];
         html += '<tr>';
-        html += '<td style="padding:3px 8px; border:1px solid #ccc;">\u2605 ' + gas.name + '</td>';
-        html += '<td style="padding:3px 8px; border:1px solid #ccc;">' + gas.gamma.toFixed(4) + '</td>';
-        html += '<td style="padding:3px 8px; border:1px solid #ccc;">' + gas.mw.toFixed(4) + '</td>';
-        html += '<td style="padding:3px 8px; border:1px solid #ccc;">';
-        html += '<button type="button" onclick="deleteCustomGas(\'' + id + '\')" style="font-size:small;">Delete</button>';
+        html += '<td>★ ' + gas.name + '</td>';
+        html += '<td>' + gas.gamma.toFixed(4) + '</td>';
+        html += '<td>' + gas.mw.toFixed(4) + '</td>';
+        html += '<td>';
+        html += '<button type="button" onclick="deleteCustomGas(\'' + id + '\')">Delete</button>';
         html += '</td>';
         html += '</tr>';
     }
@@ -1017,7 +1251,7 @@ function addGasToMixture(type) {
     
     var div = document.createElement('div');
     div.id = type + '_mix_' + index;
-    div.style.marginBottom = '5px';
+    div.className = 'mixture-component';
     
     var select = document.createElement('select');
     select.id = type + '_gas_' + index;
@@ -1053,7 +1287,7 @@ function addGasToMixture(type) {
     for (var gasId in customGases) {
         allGasOptions.push({
             value: gasId,
-            text: '\u2605 ' + customGases[gasId].name,
+            text: '★ ' + customGases[gasId].name,
             sortKey: customGases[gasId].name
         });
     }
@@ -1071,6 +1305,9 @@ function addGasToMixture(type) {
         select.appendChild(option);
     }
     
+    var label = document.createElement('span');
+    label.textContent = ' Mole Fraction: ';
+    
     var input = document.createElement('input');
     input.type = 'text';
     input.id = type + '_frac_' + index;
@@ -1086,7 +1323,7 @@ function addGasToMixture(type) {
     removeBtn.onclick = function() { removeGasFromMixture(type, index); };
     
     div.appendChild(select);
-    div.appendChild(document.createTextNode(' Mole Fraction: '));
+    div.appendChild(label);
     div.appendChild(input);
     div.appendChild(document.createTextNode(' '));
     div.appendChild(removeBtn);
@@ -1096,10 +1333,11 @@ function addGasToMixture(type) {
     defineDiv.id = type + '_define_' + index;
     defineDiv.style.display = 'none';
     defineDiv.style.marginLeft = '20px';
-    defineDiv.style.marginTop = '5px';
-    defineDiv.style.padding = '8px';
-    defineDiv.style.backgroundColor = '#ffe';
-    defineDiv.style.border = '1px solid #cc9';
+    defineDiv.style.marginTop = '8px';
+    defineDiv.style.padding = '10px';
+    defineDiv.style.backgroundColor = '#fff3cd';
+    defineDiv.style.border = '1px solid #ffc107';
+    defineDiv.style.borderRadius = '3px';
     div.appendChild(document.createElement('br'));
     div.appendChild(defineDiv);
     
@@ -1132,7 +1370,7 @@ function showDefineGasForm(type, index) {
     
     defineDiv.innerHTML = '<b>Define New Gas:</b><br>' +
         'Name: <input type="text" id="' + type + '_newgas_name_' + index + '" size="15" placeholder="e.g., Methane"> ' +
-        'Gamma (\u03B3): <input type="text" id="' + type + '_newgas_gamma_' + index + '" size="8" placeholder="e.g., 1.31"> ' +
+        'Gamma (γ): <input type="text" id="' + type + '_newgas_gamma_' + index + '" size="8" placeholder="e.g., 1.31"> ' +
         'MW (g/mol): <input type="text" id="' + type + '_newgas_mw_' + index + '" size="8" placeholder="e.g., 16.04"> ' +
         '<button type="button" onclick="saveCustomGas(\'' + type + '\', ' + index + ')">Save Gas</button> ' +
         '<button type="button" onclick="cancelDefineGas(\'' + type + '\', ' + index + ')">Cancel</button>';
@@ -1195,7 +1433,7 @@ function saveCustomGas(type, index) {
     var select = document.getElementById(type + '_gas_' + index);
     var option = document.createElement('option');
     option.value = gasId;
-    option.text = '\u2605 ' + name;
+    option.text = '★ ' + name;
     option.selected = true;
     select.appendChild(option);
     
@@ -1247,7 +1485,7 @@ function refreshAllGasDropdowns() {
                 for (var gasId in customGases) {
                     var option = document.createElement('option');
                     option.value = gasId;
-                    option.text = '\u2605 ' + customGases[gasId].name;
+                    option.text = '★ ' + customGases[gasId].name;
                     select.appendChild(option);
                 }
                 
@@ -1291,11 +1529,11 @@ function updateMixtureTotal(type) {
     var displayTotal = Math.round(total * 100 * 100) / 100; // Round to 2 decimal places
     
     if (Math.abs(total - 1.0) < 0.001) {
-        totalSpan.innerHTML = '<span style="color:green;">Total: ' + displayTotal + '% &#10003;</span>';
+        totalSpan.innerHTML = '<span style="color:#28a745;">Total: ' + displayTotal + '% ✓</span>';
     } else if (total > 0) {
-        totalSpan.innerHTML = '<span style="color:red;">Total: ' + displayTotal + '% (must equal 100%)</span>';
+        totalSpan.innerHTML = '<span style="color:#dc3545;">Total: ' + displayTotal + '% (must equal 100%)</span>';
     } else {
-        totalSpan.innerHTML = '<span style="color:#666;">Total: 0%</span>';
+        totalSpan.innerHTML = '<span style="color:#6c757d;">Total: 0%</span>';
     }
 }
 
@@ -1376,20 +1614,22 @@ function calculateMixtureProperties(type) {
     };
 }
 
-            </script>
+</script>
 
 <!-- Custom Gas Management Section -->
-<div id="custom_gas_management" style="background-color:#F1EFF7; padding:10px; margin-bottom:15px; border:1px solid #CDD1E2;">
-  <b>Custom Gases Library:</b> <span style="font-size:smaller; color:#555962;">(Saved in browser storage)</span><br>
-  <div id="custom_gas_list" style="margin-top:5px; margin-left:10px;">
-    <span style="color:#555962; font-style:italic;">No custom gases defined yet.</span>
+<div id="custom_gas_management" class="custom-gas-library">
+  <b>Custom Gases Library</b> <span style="font-size:smaller; color:#6c757d;">(Saved in browser storage)</span><br>
+  <div id="custom_gas_list" style="margin-top:8px;">
+    <span style="color:#6c757d; font-style:italic;">No custom gases defined yet.</span>
   </div>
 </div>
 
-<form name="Shock"><h2>Shock Tube Calculator</h2>
+<form name="Shock">
+<h1>Shock Tube Calculator</h1>
 
-<hr>
-<h3>Input</h3>
+<h2>Input</h2>
+
+<div class="form-group">
 <select name="drivengas" onchange="toggleMixtureInputs('driven')">
   <option value="">Select a Driven Gas</option>
   <option value="custom">Custom Mixture</option>
@@ -1401,17 +1641,33 @@ function calculateMixtureProperties(type) {
   <option value="6">Nitrogen</option> 
   <option value="8">Sulfur Hexafluoride</option>
   <option value="7">Xenon</option>
-</select>  Driven Gas <br>
-<div id="driven_mixture_div" style="display:none; margin-left:20px; background-color:#F1EFF7; padding:10px; margin-top:5px; margin-bottom:5px; border:1px solid #CDD1E2;">
-  <b>Custom Mixture (Mole Fractions):</b><br>
+</select>
+<span class="form-label">Driven Gas</span>
+</div>
+
+<div id="driven_mixture_div" class="custom-gas-section" style="display:none;">
+  <h3>Custom Mixture (Mole Fractions):</h3>
   <div id="driven_mixture_inputs"></div>
   <button type="button" onclick="addGasToMixture('driven')">Add Gas Component</button>
   <span id="driven_total" style="margin-left:10px;"></span>
 </div>
-<input maxlength="9" name="mach" size="9" value="1.53">  Mach Number (Desired) <br>
-<input maxlength="9" name="pinit" size="9" value="101325"> Pa, Initial Pressure, Driven Section <br>
-<input maxlength="9" name="tinit" size="9" value="300"> K, Initial Temperature, Driven Section <br>
 
+<div class="form-group">
+<input maxlength="9" name="mach" size="9" value="1.53">
+<span class="form-label">Mach Number (Desired)</span>
+</div>
+
+<div class="form-group">
+<input maxlength="9" name="pinit" size="9" value="101325">
+<span class="form-label">Pa, Initial Pressure, Driven Section</span>
+</div>
+
+<div class="form-group">
+<input maxlength="9" name="tinit" size="9" value="300">
+<span class="form-label">K, Initial Temperature, Driven Section</span>
+</div>
+
+<div class="form-group">
 <select name="drivergas" onchange="toggleMixtureInputs('driver')">
   <option value="">Select a Driver Gas</option>
   <option value="custom">Custom Mixture</option>
@@ -1423,195 +1679,208 @@ function calculateMixtureProperties(type) {
   <option value="6">Nitrogen</option> 
   <option value="8">Sulfur Hexafluoride</option>
   <option value="7">Xenon</option>
-</select> Driver Gas <br>
-<div id="driver_mixture_div" style="display:none; margin-left:20px; background-color:#F1EFF7; padding:10px; margin-top:5px; margin-bottom:5px; border:1px solid #CDD1E2;">
-  <b>Custom Mixture (Mole Fractions):</b><br>
+</select>
+<span class="form-label">Driver Gas</span>
+</div>
+
+<div id="driver_mixture_div" class="custom-gas-section" style="display:none;">
+  <h3>Custom Mixture (Mole Fractions):</h3>
   <div id="driver_mixture_inputs"></div>
   <button type="button" onclick="addGasToMixture('driver')">Add Gas Component</button>
   <span id="driver_total" style="margin-left:10px;"></span>
 </div>
 
-<input maxlength="9" name="tid" size="9" value="300"> K, Initial Temperature, Driver Section <br>
-<input name="convert" onclick="calcShock()" type="button" value="Calculate"> <input name="reset" type="reset" value="Reset"> <br>
+<div class="form-group">
+<input maxlength="9" name="tid" size="9" value="300">
+<span class="form-label">K, Initial Temperature, Driver Section</span>
+</div>
+
+<div class="form-group">
+<input name="convert" onclick="calcShock()" type="button" value="Calculate">
+<input name="reset" type="reset" value="Reset">
+</div>
 
 <hr>
 
-<h3>Output</h3>
+<h2>Output</h2>
 
-<table border="1">
-
-  <tbody>
-
+<table>
   <tr>
-
-    <td align="center"> </td>
-
-    <td align="center">Unshocked</td>
-
-    <td align="center">Shocked</td>
-
-    <td align="center">Driver</td>
-
-    <td align="center">Reshocked</td>
-    <td align="center"></td></tr>
-
+    <td></td>
+    <td>Unshocked</td>
+    <td>Shocked</td>
+    <td>Driver</td>
+    <td>Reshocked</td>
+    <td></td>
+  </tr>
   <tr>
-
-    <td align="center">Pressure</td>
-
-    <td align="center"><input maxlength="9" name="pdriv" size="9" value="0.101325"></td>
-
-    <td align="center"><input maxlength="9" name="pshocked" size="9" value="0.2599304145587011"></td>
-
-    <td align="center"><input maxlength="9" name="pfour" size="9" value="0.7858588290526163"></td>
-
-    <td align="center"><input maxlength="9" name="preflect" size="9" value="0.5922303848754988"></td>
-
-    <td align="center">MPa</td></tr>
-
+    <td>Pressure</td>
+    <td><input maxlength="9" name="pdriv" size="9" value="0.101325"></td>
+    <td><input maxlength="9" name="pshocked" size="9" value="0.2599304145587011"></td>
+    <td><input maxlength="9" name="pfour" size="9" value="0.7858588290526163"></td>
+    <td><input maxlength="9" name="preflect" size="9" value="0.5922303848754988"></td>
+    <td>MPa</td>
+  </tr>
   <tr>
-
-    <td align="center">Temperature</td>
-
-    <td align="center"><input maxlength="9" name="tdriv" size="9" value="300"></td>
-
-    <td align="center"><input maxlength="9" name="tshocked" size="9" value="402.5381757242417"></td>
-
-    <td align="center"><input maxlength="9" name="tfour" size="9" value="300"></td>
-
-    <td align="center"><input maxlength="9" name="treflect" size="9" value="517.9845985458894"></td>
-
-    <td align="center">K</td></tr>
-
+    <td>Temperature</td>
+    <td><input maxlength="9" name="tdriv" size="9" value="300"></td>
+    <td><input maxlength="9" name="tshocked" size="9" value="402.5381757242417"></td>
+    <td><input maxlength="9" name="tfour" size="9" value="300"></td>
+    <td><input maxlength="9" name="treflect" size="9" value="517.9845985458894"></td>
+    <td>K</td>
+  </tr>
   <tr>
-
-    <td align="center">Density</td>
-
-    <td align="center"><input maxlength="9" name="ddriv" size="9" value="1.1766497965604708"></td>
-
-    <td align="center"><input maxlength="9" name="dshocked" size="9" value="2.24958232829663"></td>
-
-    <td align="center"><input maxlength="9" name="dfour" size="9" value="9.125888293412393"></td>
-
-    <td align="center"><input maxlength="9" name="dreflect" size="9" value="3.9831412255673455"></td>
-
-    <td align="center">kg/m<sup>3</sup></td></tr>
-
+    <td>Density</td>
+    <td><input maxlength="9" name="ddriv" size="9" value="1.1766497965604708"></td>
+    <td><input maxlength="9" name="dshocked" size="9" value="2.24958232829663"></td>
+    <td><input maxlength="9" name="dfour" size="9" value="9.125888293412393"></td>
+    <td><input maxlength="9" name="dreflect" size="9" value="3.9831412255673455"></td>
+    <td>kg/m<sup>3</sup></td>
+  </tr>
   <tr>
-
-    <td align="center">Sound Speed</td>
-
-    <td align="center"><input maxlength="9" name="adriv" size="9" value="347.4631087739363"></td>
-
-    <td align="center"><input maxlength="9" name="ashocked" size="9" value="402.48677117799417"></td>
-
-    <td align="center"><input maxlength="9" name="afour" size="9" value="347.4631087739363"></td>
-
-    <td align="center"><input maxlength="9" name="areflect" size="9" value="456.56908045297877"></td>
-
-    <td align="center">m/s</td></tr>
-
+    <td>Sound Speed</td>
+    <td><input maxlength="9" name="adriv" size="9" value="347.4631087739363"></td>
+    <td><input maxlength="9" name="ashocked" size="9" value="402.48677117799417"></td>
+    <td><input maxlength="9" name="afour" size="9" value="347.4631087739363"></td>
+    <td><input maxlength="9" name="areflect" size="9" value="456.56908045297877"></td>
+    <td>m/s</td>
+  </tr>
   <tr>
+    <td>Velocity</td>
+    <td>0</td>
+    <td><input maxlength="9" name="ushocked" size="9" value="253.55410935058"></td>
+    <td>0</td>
+    <td>0</td>
+    <td>m/s</td>
+  </tr>
+</table>
 
-    <td align="center">Velocity</td>
-
-    <td align="center">0</td>
-
-    <td align="center"><input maxlength="9" name="ushocked" size="9" value="253.55410935058"></td>
-
-    <td align="center">0</td>
-
-    <td align="center">0</td>
-
-    <td align="center">m/s</td></tr></tbody></table><small>Notes: 
-
-<br>MW = <input maxlength="9" name="outmw" size="9" value="28.966"> Specific heat ratio = 
-
-<input maxlength="9" name="outgamma" size="9" value="1.402"><br>Initial wave speed = 
-
-<input maxlength="9" name="wshocked" size="9" value="531.6185564241225"> m/s<br>Reflected wave speed = 
-
-<input maxlength="9" name="wreflect" size="9" value="329.02882305300926"> m/s, M<sub>R</sub> =
-
-<input maxlength="9" name="mreflect" size="9" value="1.447458585280931"><br>Approximate driver pressure 
-
-(<input maxlength="5" name="areafact" size="5" value="1.35"> factor for area contraction) =
-
-<input maxlength="9" name="pfourpsig" size="9" value="73.54339557717464"> psig
-
-<br><a href="#" onclick="showEquationsModal(); return false;">View Equations</a>
-
+<small>
+<b>Notes:</b><br>
+MW = <input maxlength="9" name="outmw" size="9" value="28.966">
+Specific heat ratio = <input maxlength="9" name="outgamma" size="9" value="1.402"><br>
+Initial wave speed = <input maxlength="9" name="wshocked" size="9" value="531.6185564241225"> m/s<br>
+Reflected wave speed = <input maxlength="9" name="wreflect" size="9" value="329.02882305300926"> m/s,
+M<sub>R</sub> = <input maxlength="9" name="mreflect" size="9" value="1.447458585280931"><br>
+Approximate driver pressure (<input maxlength="5" name="areafact" size="5" value="1.35"> factor for area contraction) =
+<input maxlength="9" name="pfourpsig" size="9" value="73.54339557717464"> psig<br>
+<a href="#" onclick="showEquationsModal(); return false;">View Equations</a>
 </small>
 
 <hr>
 
+<h2>Timing Issues</h2>
+</form>
 
+<form name="Timing">
+<h3>Input</h3>
 
-<form name="Timing">Timing Issues<br>Input<br>
+<div class="form-group">
+<input maxlength="9" name="xwave" size="9" value="0.654">
+<span class="form-label">m, Distance Between Pressure Transducers</span>
+</div>
 
-<input maxlength="9" name="xwave" size="9" value="0.654"> m, Distance Between Pressure Transducers <br>
+<div class="form-group">
+<input maxlength="9" name="twave" size="9" value="">
+<span class="form-label">ms, Time Between Pressure Transducers</span>
+</div>
 
-<input maxlength="9" name="twave" size="9" value=" "> ms, Time Between Pressure Transducers <br>
+<div class="form-group">
+<input maxlength="9" name="xtrig" size="9" value="0.859">
+<span class="form-label">m, Distance Between Trigger Transducer and Window Centerline</span>
+</div>
 
-<input maxlength="9" name="xtrig" size="9" value="0.859"> m, Distance Between Trigger Transducer 
+<div class="form-group">
+<input maxlength="9" name="xint" size="9" value="0.4">
+<span class="form-label">m, Distance Between Trigger Transducer and Interface</span>
+</div>
 
-and Window Centerline <br>
+<h3>Output</h3>
 
-<input maxlength="9" name="xint" size="9" value="0.4"> m, Distance Between Trigger Transducer 
+<div class="form-group">
+<input maxlength="9" name="wactual" size="9" value="">
+<span class="form-label">m/s, Actual Wave Speed</span>
+</div>
 
-and Interface <br>
+<div class="form-group">
+<input maxlength="9" name="mactual" size="9" value="">
+<span class="form-label">Actual Mach Number</span>
+</div>
 
-Output<br>
+<div class="form-group">
+<input maxlength="9" name="tdelayshock" size="9" value="">
+<span class="form-label">ms, Estimated Delay Time for Shock</span>
+</div>
 
-<input maxlength="9" name="wactual" size="9" value=" "> m/s, Actual Wave Speed <br>
+<div class="form-group">
+<input maxlength="9" name="tdelaymembrane" size="9" value="">
+<span class="form-label">ms, Estimated Delay Time for Membrane</span>
+</div>
 
-<input maxlength="9" name="mactual" size="9" value=" "> Actual Mach Number <br>
-
-<input maxlength="9" name="tdelayshock" size="9" value=" "> ms, Estimated Delay Time for Shock <br>
-
-<input maxlength="9" name="tdelaymembrane" size="9" value=" "> ms, Estimated Delay Time for Membrane <br>
-
+<div class="form-group">
 <input name="convert" onclick="calcTime()" type="button" value="Calculate">
-
-<input name="reset" type="reset" value="Reset"> </form>
+<input name="reset" type="reset" value="Reset">
+</div>
+</form>
 
 <hr>
 
+<h2>Boost Tank</h2>
 
+<form name="Boosttank">
+<h3>Input</h3>
 
-<form name="Boosttank"> Boost Tank<br>Input<br>
+<div class="form-group">
+<input maxlength="9" name="drivervol" size="9" value="0.2862">
+<span class="form-label">m<sup>3</sup>, Volume of the Driver</span>
+</div>
 
-<input maxlength="9" name="drivervol" size="9" value="0.2862"> m<sup>3</sup>, Volume of the Driver <br>
+<div class="form-group">
+<input maxlength="9" name="boostvol" size="9" value="0.0538">
+<span class="form-label">m<sup>3</sup>, Volume of the Boost Tank</span>
+</div>
 
-<input maxlength="9" name="boostvol" size="9" value="0.0538"> m<sup>3</sup>, Volume of the Boost Tank <br>
+<div class="form-group">
+<input maxlength="9" name="prupture" size="9" value="">
+<span class="form-label">psig, Diaphragm Rupture Pressure</span>
+</div>
 
-<input maxlength="9" name="prupture" size="9" value=" "> psig, Diaphragm Rupture Pressure <br>
+<div class="form-group">
+<input maxlength="9" name="percless" size="9" value="5">
+<span class="form-label">%, Less than Rupture Pressure (for Pre-boost)</span>
+</div>
 
-<input maxlength="9" name="percless" size="9" value="5"> %, Less than Rupture Pressure (for Pre-boost) <br>
+<div class="form-group">
+<input maxlength="9" name="percmore" size="9" value="20">
+<span class="form-label">%, More than Rupture Pressure (for Post-boost)</span>
+</div>
 
-<input maxlength="9" name="percmore" size="9" value="20"> %, More than Rupture Pressure (for Post-boost) <br>
+<h3>Output</h3>
 
-Output<br>
+<div class="form-group">
+<input maxlength="9" name="ppreboost" size="9" value="">
+<span class="form-label">psig, Pre-boost Driver Pressure</span>
+</div>
 
-<input maxlength="9" name="ppreboost" size="9" value=" "> psig, Pre-boost Driver Pressure <br>
+<div class="form-group">
+<input maxlength="9" name="ppostboost" size="9" value="">
+<span class="form-label">psig, Post-boost Driver Pressure</span>
+</div>
 
-<input maxlength="9" name="ppostboost" size="9" value=" "> psig, Post-boost Driver Pressure <br>
+<div class="form-group">
+<input maxlength="9" name="pboosttank" size="9" value="">
+<span class="form-label">psig, Required Boost Tank Pressure</span>
+</div>
 
-<input maxlength="9" name="pboosttank" size="9" value=" "> psig, Required Boost Tank Pressure <br>
-
+<div class="form-group">
 <input name="convert" onclick="calcBoost()" type="button" value="Calculate">
-
-<input name="reset" type="reset" value="Reset"> </form>
-
-
-
-<hr>
-
+<input name="reset" type="reset" value="Reset">
+</div>
 </form>
 
 </div>
 
-<footer style="text-align:center; margin-top:40px; padding:20px; border-top:1px solid #ddd; color:#666; font-size:small;">
+<footer>
 Last updated Jan. 16, 2026 by Alex Ames; original calculator by Jason Oakley. Submit issues & feature requests on <a href="https://github.com/stillyslalom/STCalc" target="_blank">GitHub</a>.
 </footer>
 
@@ -1708,4 +1977,5 @@ window.onclick = function(event) {
 }
 </script>
 
-</body></html>
+</body>
+</html>
