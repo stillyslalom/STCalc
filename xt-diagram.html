@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>X-T Diagram Calculator - Shock Tube</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/xt-diagram.css">
+</head>
+<body>
+    <div class="container">
+        <a href="index.html" class="back-link">← Back to Shock Tube Calculator</a>
+        
+        <h1>X-T Diagram Calculator</h1>
+        
+        <p>This calculator solves the 1D compressible Euler equations to generate x-t diagrams showing shock tube evolution over time.</p>
+        
+        <!-- Import Section -->
+        <div class="import-section">
+            <h3>Quick Start: Import from Calculator</h3>
+            <button onclick="importCalculatorSettings()">Import from Shock Tube Calculator</button>
+            <div id="importInfo" class="import-info"></div>
+        </div>
+        
+        <!-- Gas Slab Configuration -->
+        <h2>Gas Slab Configuration</h2>
+        <p>Define the initial gas slabs in the shock tube. Slabs are ordered from left to right.</p>
+        
+        <div id="slabList" class="slab-list"></div>
+        
+        <button onclick="addSlab()">Add Gas Slab</button>
+        
+        <!-- Simulation Parameters -->
+        <h2>Simulation Parameters</h2>
+        
+        <div class="form-group">
+            <label for="gridPoints">Grid Points:</label>
+            <input type="number" id="gridPoints" value="500" min="100" max="2000" step="50">
+            <span style="font-size: 12px; color: #6c757d;">(100-2000, affects computation time)</span>
+        </div>
+        
+        <div class="form-group">
+            <label for="simTime">Simulation Time:</label>
+            <input type="number" id="simTime" value="20" min="1" max="100" step="1">
+            <span style="font-size: 12px; color: #6c757d;">ms</span>
+        </div>
+        
+        <div class="form-group">
+            <label for="cflNumber">CFL Number:</label>
+            <input type="number" id="cflNumber" value="0.4" min="0.1" max="0.9" step="0.05">
+            <span style="font-size: 12px; color: #6c757d;">(stability parameter, 0.4 recommended)</span>
+        </div>
+        
+        <!-- Simulation Controls -->
+        <div class="sim-controls">
+            <button id="runBtn" onclick="runSimulation()" class="success">Run Simulation</button>
+            <button onclick="resetSimulation()" class="secondary">Reset</button>
+        </div>
+        
+        <!-- Progress Bar -->
+        <div id="progressContainer" class="progress-container">
+            <div class="progress-bar">
+                <div id="progressFill" class="progress-fill" style="width: 0%;">0%</div>
+            </div>
+        </div>
+        
+        <!-- Messages -->
+        <div id="messageContainer"></div>
+        
+        <!-- Statistics -->
+        <div id="statsContainer" class="stats-container" style="display: none;"></div>
+        
+        <!-- Canvas for X-T Diagram -->
+        <div id="canvasContainer" class="canvas-container">
+            <canvas id="xtCanvas"></canvas>
+            <div class="export-controls">
+                <button onclick="exportImage()">Download Image (PNG)</button>
+                <button onclick="exportXTData()">Download X-T Data (CSV)</button>
+                <button onclick="exportTracerData()">Download Tracer Data (CSV)</button>
+                <button onclick="exportJSON()" class="secondary">Download Complete Data (JSON)</button>
+            </div>
+        </div>
+        
+        <footer>
+            X-T Diagram Calculator by Alex Ames, 2026. 
+            <a href="https://github.com/stillyslalom/STCalc" target="_blank">GitHub</a>
+        </footer>
+    </div>
+    
+    <!-- Load JavaScript modules -->
+    <script src="js/shock-import.js"></script>
+    <script src="js/euler-solver.js"></script>
+    <script src="js/xt-visualization.js"></script>
+    
+    <script>
+        // Global state
+        let slabs = [];
+        let slabCounter = 0;
+        let solver = null;
+        let visualization = null;
+        let results = null;
+        
+        // Initialize on page load
+        window.onload = function() {
+            // Try to import settings if available
+            const imported = importFromCalculator();
+            if (imported) {
+                showMessage('Calculator settings detected. Click "Import from Shock Tube Calculator" to load them.', 'info');
+            }
+            
+            // Add default slabs if none exist
+            if (slabs.length === 0) {
+                addDefaultSlabs();
+            }
+            
+            // Initialize visualization
+            visualization = new XTVisualization('xtCanvas', {
+                width: 1000,
+                height: 600
+            });
+        };
+        
+        // Add default driver/driven configuration
+        function addDefaultSlabs() {
+            // Default driven section (Air, 101 kPa, 300 K, 6 m)
+            addSlab({
+                gas: '1',
+                pressure: 101325,
+                temperature: 300,
+                length: 6
+            });
+            
+            // Default driver section (Helium, 400 kPa, 300 K, 3 m)
+            addSlab({
+                gas: '4',
+                pressure: 400000,
+                temperature: 300,
+                length: 3
+            });
+        }
+        
+        // Import settings from shock tube calculator
+        function importCalculatorSettings() {
+            const imported = importFromCalculator();
+            
+            if (!imported) {
+                showMessage('No calculator settings found. Please configure and run the shock tube calculator first.', 'warning');
+                return;
+            }
+            
+            // Clear existing slabs
+            slabs = [];
+            document.getElementById('slabList').innerHTML = '';
+            slabCounter = 0;
+            
+            // Add driven section (default 6 m)
+            addSlab({
+                gas: imported.driven.gas.gasId,
+                pressure: imported.driven.pressure,
+                temperature: imported.driven.temperature,
+                length: 6
+            });
+            
+            // Add driver section (default 3 m)
+            addSlab({
+                gas: imported.driver.gas.gasId,
+                pressure: imported.driver.pressure,
+                temperature: imported.driver.temperature,
+                length: 3
+            });
+            
+            // Show import info
+            const info = `
+                <div class="gas-info"><strong>Driven:</strong> ${imported.driven.gas.name} at ${(imported.driven.pressure/1000).toFixed(1)} kPa, ${imported.driven.temperature} K</div>
+                <div class="gas-info"><strong>Driver:</strong> ${imported.driver.gas.name} at ${(imported.driver.pressure/1000).toFixed(1)} kPa, ${imported.driver.temperature} K</div>
+                <div class="gas-info"><strong>Mach:</strong> ${imported.mach.toFixed(2)}</div>
+            `;
+            document.getElementById('importInfo').innerHTML = info;
+            
+            showMessage('Settings imported successfully! Adjust slab lengths as needed.', 'success');
+        }
+        
+        // Add a gas slab
+        function addSlab(config = {}) {
+            const id = slabCounter++;
+            const slab = {
+                id: id,
+                gas: config.gas || '',
+                pressure: config.pressure || 101325,
+                temperature: config.temperature || 300,
+                length: config.length || 1
+            };
+            
+            slabs.push(slab);
+            renderSlabs();
+        }
+        
+        // Remove a slab
+        function removeSlab(id) {
+            slabs = slabs.filter(s => s.id !== id);
+            renderSlabs();
+        }
+        
+        // Move slab up
+        function moveSlabUp(id) {
+            const index = slabs.findIndex(s => s.id === id);
+            if (index > 0) {
+                [slabs[index - 1], slabs[index]] = [slabs[index], slabs[index - 1]];
+                renderSlabs();
+            }
+        }
+        
+        // Move slab down
+        function moveSlabDown(id) {
+            const index = slabs.findIndex(s => s.id === id);
+            if (index < slabs.length - 1) {
+                [slabs[index], slabs[index + 1]] = [slabs[index + 1], slabs[index]];
+                renderSlabs();
+            }
+        }
+        
+        // Render slab list
+        function renderSlabs() {
+            const container = document.getElementById('slabList');
+            
+            if (slabs.length === 0) {
+                container.innerHTML = '<p style="color: #6c757d;">No slabs configured. Add at least one slab to begin.</p>';
+                return;
+            }
+            
+            container.innerHTML = slabs.map((slab, index) => {
+                const gas = getGasById(slab.gas);
+                const gasName = gas ? gas.name : 'Not selected';
+                
+                return `
+                    <div class="slab-item">
+                        <div class="slab-number">#${index + 1}</div>
+                        <div class="slab-controls">
+                            <div class="slab-field">
+                                <label>Gas</label>
+                                <select onchange="updateSlab(${slab.id}, 'gas', this.value)">
+                                    ${generateGasOptions(slab.gas)}
+                                </select>
+                            </div>
+                            <div class="slab-field">
+                                <label>Pressure (kPa)</label>
+                                <input type="number" value="${(slab.pressure / 1000).toFixed(1)}" 
+                                       onchange="updateSlab(${slab.id}, 'pressure', this.value * 1000)" 
+                                       step="1" min="1">
+                            </div>
+                            <div class="slab-field">
+                                <label>Temperature (K)</label>
+                                <input type="number" value="${slab.temperature}" 
+                                       onchange="updateSlab(${slab.id}, 'temperature', this.value)" 
+                                       step="1" min="1">
+                            </div>
+                            <div class="slab-field">
+                                <label>Length (m)</label>
+                                <input type="number" value="${slab.length}" 
+                                       onchange="updateSlab(${slab.id}, 'length', this.value)" 
+                                       step="0.1" min="0.1">
+                            </div>
+                        </div>
+                        <div class="slab-actions">
+                            <button onclick="moveSlabUp(${slab.id})" ${index === 0 ? 'disabled' : ''}>↑</button>
+                            <button onclick="moveSlabDown(${slab.id})" ${index === slabs.length - 1 ? 'disabled' : ''}>↓</button>
+                            <button onclick="removeSlab(${slab.id})" class="danger">Remove</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        // Generate gas options for dropdown
+        function generateGasOptions(selectedGas) {
+            const allGases = getAllGases();
+            let options = '<option value="">Select Gas</option>';
+            
+            // Sort alphabetically
+            const gasEntries = Object.entries(allGases).sort((a, b) => 
+                a[1].name.localeCompare(b[1].name)
+            );
+            
+            for (let [id, gas] of gasEntries) {
+                const selected = id === selectedGas ? 'selected' : '';
+                const prefix = id.startsWith('custom_') ? '★ ' : '';
+                options += `<option value="${id}" ${selected}>${prefix}${gas.name}</option>`;
+            }
+            
+            return options;
+        }
+        
+        // Update slab property
+        function updateSlab(id, property, value) {
+            const slab = slabs.find(s => s.id === id);
+            if (slab) {
+                slab[property] = parseFloat(value) || value;
+            }
+        }
+        
+        // Validate configuration
+        function validateConfiguration() {
+            if (slabs.length === 0) {
+                showMessage('Please add at least one gas slab.', 'error');
+                return false;
+            }
+            
+            for (let i = 0; i < slabs.length; i++) {
+                const slab = slabs[i];
+                
+                if (!slab.gas) {
+                    showMessage(`Slab #${i + 1}: Please select a gas.`, 'error');
+                    return false;
+                }
+                
+                if (slab.pressure <= 0) {
+                    showMessage(`Slab #${i + 1}: Pressure must be positive.`, 'error');
+                    return false;
+                }
+                
+                if (slab.temperature <= 0) {
+                    showMessage(`Slab #${i + 1}: Temperature must be positive.`, 'error');
+                    return false;
+                }
+                
+                if (slab.length <= 0) {
+                    showMessage(`Slab #${i + 1}: Length must be positive.`, 'error');
+                    return false;
+                }
+            }
+            
+            return true;
+        }
+        
+        // Run simulation
+        function runSimulation() {
+            if (!validateConfiguration()) {
+                return;
+            }
+            
+            // Disable run button
+            const runBtn = document.getElementById('runBtn');
+            runBtn.disabled = true;
+            runBtn.textContent = 'Running...';
+            
+            // Show progress
+            const progressContainer = document.getElementById('progressContainer');
+            progressContainer.classList.add('active');
+            
+            // Clear previous results
+            document.getElementById('canvasContainer').classList.remove('active');
+            document.getElementById('statsContainer').style.display = 'none';
+            
+            // Get simulation parameters
+            const nx = parseInt(document.getElementById('gridPoints').value);
+            const simTime = parseFloat(document.getElementById('simTime').value) / 1000; // Convert to seconds
+            const cfl = parseFloat(document.getElementById('cflNumber').value);
+            
+            // Prepare slab data for solver
+            const slabData = slabs.map(slab => {
+                const gas = getGasById(slab.gas);
+                return {
+                    gasId: slab.gas,
+                    gamma: gas.gamma,
+                    mw: gas.mw,
+                    pressure: slab.pressure,
+                    temperature: slab.temperature,
+                    length: slab.length
+                };
+            });
+            
+            // Create solver
+            solver = new EulerSolver({
+                nx: nx,
+                finalTime: simTime,
+                cfl: cfl,
+                xtInterval: simTime / 200  // Store ~200 time snapshots
+            });
+            
+            // Initialize
+            try {
+                solver.initialize(slabData);
+                showMessage('Simulation initialized. Running solver...', 'info');
+                
+                // Run in setTimeout to allow UI update
+                setTimeout(() => {
+                    try {
+                        solver.run((progress) => {
+                            updateProgress(progress);
+                        });
+                        
+                        // Get results
+                        results = solver.getResults();
+                        
+                        // Visualize
+                        visualization.setData(results);
+                        visualization.render();
+                        
+                        // Show results
+                        document.getElementById('canvasContainer').classList.add('active');
+                        displayStatistics(results);
+                        
+                        showMessage('Simulation completed successfully!', 'success');
+                        
+                    } catch (error) {
+                        showMessage('Simulation error: ' + error.message, 'error');
+                        console.error(error);
+                    } finally {
+                        runBtn.disabled = false;
+                        runBtn.textContent = 'Run Simulation';
+                        progressContainer.classList.remove('active');
+                    }
+                }, 100);
+                
+            } catch (error) {
+                showMessage('Initialization error: ' + error.message, 'error');
+                console.error(error);
+                runBtn.disabled = false;
+                runBtn.textContent = 'Run Simulation';
+                progressContainer.classList.remove('active');
+            }
+        }
+        
+        // Update progress bar
+        function updateProgress(progress) {
+            const progressFill = document.getElementById('progressFill');
+            const percent = Math.round(progress * 100);
+            progressFill.style.width = percent + '%';
+            progressFill.textContent = percent + '%';
+        }
+        
+        // Display statistics
+        function displayStatistics(results) {
+            const container = document.getElementById('statsContainer');
+            
+            const totalLength = results.x[results.x.length - 1];
+            const numSnapshots = results.xtData.length;
+            
+            container.innerHTML = `
+                <div class="stat-item">
+                    <div class="stat-label">Time Steps</div>
+                    <div class="stat-value">${results.timeSteps.toLocaleString()}</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Final Time</div>
+                    <div class="stat-value">${(results.t * 1000).toFixed(2)} ms</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">X-T Snapshots</div>
+                    <div class="stat-value">${numSnapshots}</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Domain Length</div>
+                    <div class="stat-value">${totalLength.toFixed(2)} m</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Grid Points</div>
+                    <div class="stat-value">${results.x.length}</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Interfaces Tracked</div>
+                    <div class="stat-value">${results.tracers.length}</div>
+                </div>
+            `;
+            
+            container.style.display = 'grid';
+        }
+        
+        // Reset simulation
+        function resetSimulation() {
+            solver = null;
+            results = null;
+            document.getElementById('canvasContainer').classList.remove('active');
+            document.getElementById('statsContainer').style.display = 'none';
+            document.getElementById('messageContainer').innerHTML = '';
+            document.getElementById('progressContainer').classList.remove('active');
+        }
+        
+        // Export functions
+        function exportImage() {
+            if (!visualization || !results) {
+                showMessage('No simulation results to export.', 'warning');
+                return;
+            }
+            visualization.exportImage('shock-tube-xt-diagram.png');
+        }
+        
+        function exportXTData() {
+            if (!results) {
+                showMessage('No simulation results to export.', 'warning');
+                return;
+            }
+            
+            let csv = 'Time (ms),Position (m),Pressure (kPa)\n';
+            
+            for (let snapshot of results.xtData) {
+                const t = snapshot.t * 1000; // Convert to ms
+                for (let i = 0; i < snapshot.p.length; i++) {
+                    const x = results.x[i];
+                    const p = snapshot.p[i] / 1000; // Convert to kPa
+                    csv += `${t.toFixed(4)},${x.toFixed(4)},${p.toFixed(2)}\n`;
+                }
+            }
+            
+            downloadCSV(csv, 'xt-diagram-data.csv');
+        }
+        
+        function exportTracerData() {
+            if (!results) {
+                showMessage('No simulation results to export.', 'warning');
+                return;
+            }
+            
+            let csv = 'Interface,Time (ms),Position (m)\n';
+            
+            for (let i = 0; i < results.tracers.length; i++) {
+                const tracer = results.tracers[i];
+                for (let point of tracer.trajectory) {
+                    csv += `${i + 1},${(point.t * 1000).toFixed(4)},${point.x.toFixed(4)}\n`;
+                }
+            }
+            
+            downloadCSV(csv, 'tracer-trajectories.csv');
+        }
+        
+        function exportJSON() {
+            if (!results) {
+                showMessage('No simulation results to export.', 'warning');
+                return;
+            }
+            
+            const data = {
+                configuration: {
+                    slabs: slabs,
+                    gridPoints: parseInt(document.getElementById('gridPoints').value),
+                    simulationTime: parseFloat(document.getElementById('simTime').value),
+                    cfl: parseFloat(document.getElementById('cflNumber').value)
+                },
+                results: results
+            };
+            
+            const json = JSON.stringify(data, null, 2);
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'simulation-complete.json';
+            link.click();
+            URL.revokeObjectURL(url);
+        }
+        
+        // Helper function to download CSV
+        function downloadCSV(csv, filename) {
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            link.click();
+            URL.revokeObjectURL(url);
+        }
+        
+        // Show message
+        function showMessage(message, type = 'info') {
+            const container = document.getElementById('messageContainer');
+            container.innerHTML = `<div class="info-message ${type}">${message}</div>`;
+            
+            // Auto-hide success messages after 5 seconds
+            if (type === 'success') {
+                setTimeout(() => {
+                    container.innerHTML = '';
+                }, 5000);
+            }
+        }
+    </script>
+</body>
+</html>
