@@ -246,7 +246,22 @@ function calculateXTMixtureProperties(slabId) {
 function getXTSlabGasProperties(slab) {
     if (slab.gas === 'custom_mixture') {
         // Calculate mixture properties
-        return calculateXTMixtureProperties(slab.id);
+        var props = calculateXTMixtureProperties(slab.id);
+        
+        // Generate human-readable name
+        var allGases = getAllGases();
+        var names = [];
+        for (var i = 0; i < props.components.length; i++) {
+            var comp = props.components[i];
+            var percent = Math.round(comp.fraction * 100);
+            names.push(percent + '% ' + comp.gas.name);
+        }
+        
+        return {
+            gamma: props.gamma,
+            mw: props.mw,
+            gasName: names.join(', ')
+        };
     } else {
         // Single gas
         var gas = getAllGases()[slab.gas];
@@ -255,7 +270,8 @@ function getXTSlabGasProperties(slab) {
         }
         return {
             gamma: gas.gamma,
-            mw: gas.mw
+            mw: gas.mw,
+            gasName: gas.name
         };
     }
 }

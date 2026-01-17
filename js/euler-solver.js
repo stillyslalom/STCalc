@@ -395,12 +395,19 @@ class EulerSolver {
     }
     
     /**
-     * Store current pressure field for x-t diagram
+     * Store current state for x-t diagram
+     * Includes all primitive variables and material properties
      */
     storeXTData() {
         const snapshot = {
             t: this.t,
-            p: new Float64Array(this.p)  // Copy pressure array
+            rho: new Float64Array(this.rho),    // Density
+            u: new Float64Array(this.u),        // Velocity
+            p: new Float64Array(this.p),        // Pressure
+            T: new Float64Array(this.T),        // Temperature
+            gamma: new Float64Array(this.gamma), // Specific heat ratio
+            mw: new Float64Array(this.mw),      // Molecular weight
+            gasId: Array.from(this.gasId)       // Gas identifier
         };
         this.xtData.push(snapshot);
     }

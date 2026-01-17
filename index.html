@@ -2456,10 +2456,21 @@ function renderXTSlabs() {
         return;
     }
     
+    // Store current values before rebuilding
+    var currentValues = {};
+    for (var i = 0; i < xtSlabs.length; i++) {
+        var slab = xtSlabs[i];
+        var selectElem = document.getElementById('xt_slab_gas_' + slab.id);
+        if (selectElem) {
+            currentValues[slab.id] = selectElem.value;
+        }
+    }
+    
     var html = '';
     for (var i = 0; i < xtSlabs.length; i++) {
         var slab = xtSlabs[i];
-        var gas = getAllGases()[slab.gas];
+        // Use stored value if available, otherwise use slab.gas
+        var selectedGas = currentValues[slab.id] !== undefined ? currentValues[slab.id] : slab.gas;
         
         html += '<div class="slab-item" id="xt_slab_item_' + slab.id + '">';
         html += '<div class="slab-number">#' + (i + 1) + '</div>';
@@ -2467,7 +2478,7 @@ function renderXTSlabs() {
         html += '<div class="slab-field">';
         html += '<label>Gas</label>';
         html += '<select id="xt_slab_gas_' + slab.id + '" onchange="updateXTSlab(' + slab.id + ', \'gas\', this.value); toggleXTSlabMixture(' + slab.id + ')">';
-        html += generateXTGasOptions(slab.gas);
+        html += generateXTGasOptions(selectedGas);
         html += '</select>';
         html += '</div>';
         html += '<div class="slab-field">';
@@ -2563,7 +2574,7 @@ function runXTSimulation() {
         slabData = xtSlabs.map(function(slab) {
             var props = getXTSlabGasProperties(slab);
             return {
-                gasId: slab.gas,
+                gasId: props.gasName,  // Use human-readable name
                 gamma: props.gamma,
                 mw: props.mw,
                 pressure: slab.pressure,
@@ -2665,12 +2676,23 @@ function exportXTDataCSV() {
         return;
     }
     
-    var csv = 'Time (ms),Position (m),Pressure (kPa)\n';
+    // CSV header with all fields
+    var csv = 'Time (ms),Position (m),Density (kg/m³),Velocity (m/s),Pressure (kPa),Temperature (K),Gamma,MW (g/mol),Gas ID\n';
+    
     for (var j = 0; j < xtResults.xtData.length; j++) {
         var snapshot = xtResults.xtData[j];
         var t = snapshot.t * 1000;
+        
         for (var i = 0; i < snapshot.p.length; i++) {
-            csv += t.toFixed(4) + ',' + xtResults.x[i].toFixed(4) + ',' + (snapshot.p[i] / 1000).toFixed(2) + '\n';
+            csv += t.toFixed(4) + ',';                              // Time (ms)
+            csv += xtResults.x[i].toFixed(4) + ',';                 // Position (m)
+            csv += snapshot.rho[i].toFixed(4) + ',';                // Density (kg/m³)
+            csv += snapshot.u[i].toFixed(4) + ',';                  // Velocity (m/s)
+            csv += (snapshot.p[i] / 1000).toFixed(4) + ',';         // Pressure (kPa)
+            csv += snapshot.T[i].toFixed(4) + ',';                  // Temperature (K)
+            csv += snapshot.gamma[i].toFixed(6) + ',';              // Gamma
+            csv += snapshot.mw[i].toFixed(4) + ',';                 // Molecular weight (g/mol)
+            csv += snapshot.gasId[i] + '\n';                        // Gas ID
         }
     }
     
