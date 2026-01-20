@@ -2501,6 +2501,10 @@ function generateXTGasOptions(selectedGas) {
     for (var i = 0; i < gasEntries.length; i++) {
         var id = gasEntries[i][0];
         var gas = gasEntries[i][1];
+        
+        // Skip Acetone Vapor in single gas selection (only available in custom mixtures)
+        if (gas.name === 'Acetone Vapor') continue;
+        
         var selected = id === selectedGas ? 'selected' : '';
         var prefix = id.startsWith('custom_') ? '★ ' : '';
         options += '<option value="' + id + '" ' + selected + '>' + prefix + gas.name + '</option>';

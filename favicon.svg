@@ -1,55 +1,62 @@
 ﻿<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
   <defs>
-    <!-- Bright left fan: pink (high) -> orange/red -> deep purple -->
-    <radialGradient id="leftFan" cx="10%" cy="90%" r="85%">
-      <stop offset="0%"   stop-color="#ffd3ff"/>
-      <stop offset="22%"  stop-color="#ffb3ff"/>
-      <stop offset="45%"  stop-color="#ff6b3f"/>
-      <stop offset="68%"  stop-color="#b51f3a"/>
-      <stop offset="100%" stop-color="#2b0a56"/>
+    <!-- Main field (purple top-left blending into broad red region) -->
+    <linearGradient id="fieldPR" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"  stop-color="#5b1a7a"/>
+      <stop offset="22%" stop-color="#4a126f"/>
+      <stop offset="50%" stop-color="#d9484c"/>
+      <stop offset="100%" stop-color="#d84549"/>
+    </linearGradient>
+
+    <!-- Extra purple wash concentrated at top-left (matches the darker cap) -->
+    <radialGradient id="topPurpleWash" cx="0%" cy="0%" r="85%">
+      <stop offset="0%"  stop-color="#3a0f6a" stop-opacity="0.90"/>
+      <stop offset="45%" stop-color="#3a0f6a" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#3a0f6a" stop-opacity="0"/>
     </radialGradient>
 
-    <!-- Central field: mostly purple with subtle variation like the colormap -->
-    <linearGradient id="midPurple" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%"   stop-color="#2a0a52"/>
-      <stop offset="35%"  stop-color="#3a0f6a"/>
-      <stop offset="70%"  stop-color="#3c106f"/>
-      <stop offset="100%" stop-color="#2f0b5b"/>
-    </linearGradient>
+    <!-- Bottom-left expansion fan: bright pink core -> orange ridge -> fades into red -->
+    <radialGradient id="fanPinkOrange" cx="0%" cy="100%" r="120%">
+      <stop offset="0%"  stop-color="#ffd1ff" stop-opacity="1"/>
+      <stop offset="42%" stop-color="#ffb8ff" stop-opacity="1"/>
+      <stop offset="60%" stop-color="#ff6a3d" stop-opacity="0.95"/>
+      <stop offset="78%" stop-color="#d9484c" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#d9484c" stop-opacity="0"/>
+    </radialGradient>
 
-    <!-- Slight vertical shading to mimic the time gradient in the plot -->
-    <linearGradient id="timeShade" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%"   stop-color="#000000" stop-opacity="0.10"/>
-      <stop offset="55%"  stop-color="#000000" stop-opacity="0.00"/>
-      <stop offset="100%" stop-color="#000000" stop-opacity="0.22"/>
-    </linearGradient>
+    <!-- Slight darkening near the bottom center (helps match the red depth near the origin) -->
+    <radialGradient id="bottomCenterShade" cx="42%" cy="92%" r="55%">
+      <stop offset="0%"  stop-color="#000000" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
 
-    <!-- Soft blend band near the diaphragm location -->
-    <linearGradient id="diaphragmBand" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%"   stop-color="#ff6b3f" stop-opacity="0.0"/>
-      <stop offset="45%"  stop-color="#ff6b3f" stop-opacity="0.18"/>
-      <stop offset="55%"  stop-color="#ff6b3f" stop-opacity="0.10"/>
-      <stop offset="100%" stop-color="#ff6b3f" stop-opacity="0.0"/>
+    <!-- Soft anti-alias band along the black boundary to mimic the slightly blended edge -->
+    <linearGradient id="edgeFeather" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%"   stop-color="#2a0a52" stop-opacity="0.25"/>
+      <stop offset="60%"  stop-color="#2a0a52" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#2a0a52" stop-opacity="0"/>
     </linearGradient>
   </defs>
 
-  <!-- No axes; full-bleed diagram field -->
-  <rect x="0" y="0" width="64" height="64" fill="#0b0513"/>
+  <!-- Left/center field up to the black region boundary (diagonal from (26,64) to (64,0)) -->
+  <polygon points="0,0 64,0 26,64 0,64" fill="url(#fieldPR)"/>
 
-  <!-- Left high-pressure wedge / expansion fan -->
-  <polygon points="0,64 0,0 24,0 24,64" fill="url(#leftFan)"/>
+  <!-- Top-left purple cap -->
+  <rect x="0" y="0" width="64" height="64" fill="url(#topPurpleWash)"/>
 
-  <!-- Central purple field -->
-  <polygon points="24,0 64,0 64,64 24,64" fill="url(#midPurple)"/>
+  <!-- Bottom-left expansion fan wedge -->
+  <polygon points="0,64 0,34 26,64" fill="url(#fanPinkOrange)"/>
 
-  <!-- Right low-pressure triangular region (black) -->
-  <polygon points="30,64 64,64 64,12" fill="#000000" opacity="0.92"/>
+  <!-- Subtle deepening near the bottom-center -->
+  <rect x="0" y="0" width="64" height="64" fill="url(#bottomCenterShade)"/>
 
-  <!-- Subtle vertical (time) shading overlay -->
-  <rect x="0" y="0" width="64" height="64" fill="url(#timeShade)"/>
+  <!-- Black low-pressure wedge -->
+  <polygon points="26,64 64,64 64,0" fill="#000000"/>
 
+  <!-- Feather just left of the black boundary -->
+  <!-- polygon points="22,64 26,64 64,0 60,0" fill="url(#edgeFeather)"/ -->
 
-  <!-- Diagonal shock/contact line -->
-  <line x1="24" y1="64" x2="44" y2="0" stroke="#ffffff" stroke-width="5" stroke-linecap="round"/>
+  <!-- White characteristic line (slightly left of the black boundary) -->
+  <line x1="26" y1="64" x2="39" y2="0" stroke="#ffffff" stroke-width="5" stroke-linecap="round"/>
 </svg>

@@ -89,6 +89,171 @@ function updateXTMixtureComponent(slabId, compId, property, value) {
 }
 
 /**
+ * Handle gas selection for X-T mixture component
+ */
+function handleXTMixtureGasSelection(slabId, compId, value) {
+    if (value === 'define_new') {
+        showXTDefineGasForm(slabId, compId);
+    } else {
+        // Hide definition form if showing
+        var defineDiv = document.getElementById('xt_define_' + slabId + '_' + compId);
+        if (defineDiv) {
+            defineDiv.style.display = 'none';
+        }
+        updateXTMixtureComponent(slabId, compId, 'gasId', value);
+    }
+}
+
+/**
+ * Show custom gas definition form for X-T mixture
+ */
+function showXTDefineGasForm(slabId, compId) {
+    var defineDiv = document.getElementById('xt_define_' + slabId + '_' + compId);
+    if (!defineDiv) return;
+    
+    defineDiv.innerHTML = '<div style="background-color:#fff3cd;border:1px solid #ffc107;border-radius:3px;padding:10px;margin-top:5px;">' +
+        '<b>Define New Gas:</b><br>' +
+        'Name: <input type="text" id="xt_newgas_name_' + slabId + '_' + compId + '" size="15" placeholder="e.g., Methane" style="margin:5px 5px 5px 0;"> ' +
+        'Gamma (γ): <input type="text" id="xt_newgas_gamma_' + slabId + '_' + compId + '" size="8" placeholder="e.g., 1.31" style="margin:5px 5px 5px 0;"> ' +
+        'MW (g/mol): <input type="text" id="xt_newgas_mw_' + slabId + '_' + compId + '" size="8" placeholder="e.g., 16.04" style="margin:5px 5px 5px 0;"> ' +
+        '<button type="button" onclick="saveXTCustomGas(' + slabId + ', ' + compId + ')" style="margin:5px 5px 5px 0;">Save Gas</button> ' +
+        '<button type="button" onclick="cancelXTDefineGas(' + slabId + ', ' + compId + ')" style="margin:5px 0;">Cancel</button>' +
+        '</div>';
+    
+    defineDiv.style.display = 'block';
+}
+
+/**
+ * Save a new custom gas from X-T mixture interface
+ */
+function saveXTCustomGas(slabId, compId) {
+    var nameInput = document.getElementById('xt_newgas_name_' + slabId + '_' + compId);
+    var gammaInput = document.getElementById('xt_newgas_gamma_' + slabId + '_' + compId);
+    var mwInput = document.getElementById('xt_newgas_mw_' + slabId + '_' + compId);
+    
+    var name = nameInput.value.trim();
+    var gamma = parseFloat(gammaInput.value);
+    var mw = parseFloat(mwInput.value);
+    
+    // Validate inputs
+    if (!name) {
+        alert('Please enter a gas name.');
+        nameInput.focus();
+        return;
+    }
+    
+    if (isNaN(gamma) || gamma <= 1.0) {
+        alert('Gamma must be a number greater than 1.0 (thermodynamically required for ideal gases).');
+        gammaInput.focus();
+        return;
+    }
+    
+    if (isNaN(mw) || mw <= 0) {
+        alert('Molecular weight must be a positive number.');
+        mwInput.focus();
+        return;
+    }
+    
+    // Check for duplicate name
+    var allGases = getAllGases();
+    for (var id in allGases) {
+        if (allGases[id].name.toLowerCase() === name.toLowerCase()) {
+            alert('A gas with this name already exists. Please use a different name.');
+            nameInput.focus();
+            return;
+        }
+    }
+    
+    // Create new custom gas
+    var gasId = 'custom_' + customGasCounter++;
+    customGases[gasId] = {
+        id: gasId,
+        name: name,
+        gamma: gamma,
+        mw: mw
+    };
+    
+    // Save to localStorage
+    saveCustomGases();
+    
+    // Update the component's gas selection
+    updateXTMixtureComponent(slabId, compId, 'gasId', gasId);
+    
+    // Hide the definition form
+    var defineDiv = document.getElementById('xt_define_' + slabId + '_' + compId);
+    if (defineDiv) {
+        defineDiv.style.display = 'none';
+    }
+    
+    // Refresh all X-T mixture dropdowns to include the new gas
+    refreshAllXTMixtureDropdowns();
+    
+    // Update custom gases list in main calculator if present
+    if (typeof updateCustomGasList === 'function') {
+        updateCustomGasList();
+    }
+    
+    // Re-render to show the selected gas
+    renderXTMixtureInputs(slabId);
+    
+    alert('Custom gas "' + name + '" saved successfully!');
+}
+
+/**
+ * Cancel custom gas definition in X-T mixture
+ */
+function cancelXTDefineGas(slabId, compId) {
+    var select = document.getElementById('xt_mix_gas_' + slabId + '_' + compId);
+    var defineDiv = document.getElementById('xt_define_' + slabId + '_' + compId);
+    
+    if (select) {
+        select.value = '';
+    }
+    if (defineDiv) {
+        defineDiv.style.display = 'none';
+    }
+    
+    updateXTMixtureComponent(slabId, compId, 'gasId', '');
+}
+
+/**
+ * Refresh all X-T mixture dropdowns to include newly added custom gases
+ */
+function refreshAllXTMixtureDropdowns() {
+    // Iterate through all slabs with custom mixtures
+    for (var slabId in xtSlabMixtures) {
+        var components = xtSlabMixtures[slabId];
+        for (var i = 0; i < components.length; i++) {
+            var comp = components[i];
+            var select = document.getElementById('xt_mix_gas_' + slabId + '_' + comp.id);
+            if (select) {
+                var currentValue = select.value;
+                
+                // Rebuild options
+                var allGases = getAllGases();
+                var html = '<option value="">Select Gas</option>';
+                html += '<option value="define_new">--- Define New Gas... ---</option>';
+                html += '<option disabled>──────────</option>';
+                
+                var gasEntries = Object.entries(allGases).sort(function(a, b) {
+                    return a[1].name.localeCompare(b[1].name);
+                });
+                
+                for (var j = 0; j < gasEntries.length; j++) {
+                    var gasId = gasEntries[j][0];
+                    var gas = gasEntries[j][1];
+                    var prefix = gasId.startsWith('custom_') ? '★ ' : '';
+                    html += '<option value="' + gasId + '">' + prefix + gas.name + '</option>';
+                }
+                
+                select.innerHTML = html;
+                select.value = currentValue;
+            }
+        }
+    }
+}
+
+/**
  * Render mixture input controls for a slab
  */
 function renderXTMixtureInputs(slabId) {
@@ -104,9 +269,11 @@ function renderXTMixtureInputs(slabId) {
         var comp = components[i];
         html += '<div class="mixture-component" style="display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; margin-bottom: 8px;">';
         html += '<select id="xt_mix_gas_' + slabId + '_' + comp.id + '" ';
-        html += 'onchange="updateXTMixtureComponent(' + slabId + ', ' + comp.id + ', \'gasId\', this.value)" ';
+        html += 'onchange="handleXTMixtureGasSelection(' + slabId + ', ' + comp.id + ', this.value)" ';
         html += 'style="min-width: 150px;">';
         html += '<option value="">Select Gas</option>';
+        html += '<option value="define_new">--- Define New Gas... ---</option>';
+        html += '<option disabled>──────────</option>';
         
         // Add all available gases
         var allGases = getAllGases();
@@ -130,6 +297,10 @@ function renderXTMixtureInputs(slabId) {
         html += 'step="0.01" min="0" max="1" style="width: 80px;">';
         html += '<button type="button" onclick="removeXTMixtureComponent(' + slabId + ', ' + comp.id + ')" ';
         html += 'style="padding: 4px 10px; font-size: 12px; white-space: nowrap;">Remove</button>';
+        
+        // Container for custom gas definition form
+        html += '<div id="xt_define_' + slabId + '_' + comp.id + '" style="display:none;"></div>';
+        
         html += '</div>';
     }
     
