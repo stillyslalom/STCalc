@@ -1,6 +1,6 @@
 # X-T Diagram Calculator
 
-A high-performance 1D multicomponent compressible Euler solver for generating shock tube x-t diagrams.
+A 1D multicomponent compressible Euler solver for generating shock tube x-t diagrams using JavaScript running in your web browser.
 
 ## Overview
 
@@ -18,7 +18,7 @@ The X-T Diagram Calculator solves the 1D compressible Euler equations using a fi
 ### Gas Database
 - Pre-defined gases: Air, Nitrogen, Helium, Argon, Xenon, CO₂, SF₆, Neon, Acetone Vapor
 - Custom gas mixtures supported
-- Import settings from the main Shock Tube Calculator
+- Import initial conditions from the main Shock Tube Calculator
 
 ## Technical Details
 
@@ -173,25 +173,11 @@ using forward Euler with the local fluid velocity.
 4. **No Chemistry**: No reactions or dissociation
 5. **Reflective Boundaries**: Tube ends treated as solid walls
 
-## Validation
-
-The solver has been validated against:
-- Sod shock tube problem (exact Riemann solution)
-- Helium-air shock tube experiments
-- Two-gas interface problems
-
-Typical errors:
-- Shock position: < 1% at late time
-- Post-shock pressure: < 0.5%
-- Interface tracking: < 2%
-
 ## Browser Compatibility
 
 Tested on:
 - Chrome 90+
 - Firefox 88+
-- Edge 90+
-- Safari 14+
 
 Requires:
 - HTML5 Canvas support
