@@ -2354,11 +2354,18 @@ function useCurrentCalculation() {
     document.getElementById('xtImportWarning').textContent = '';
     document.getElementById('xtImportInfo').textContent = '';
     
-    // Clear existing slabs
-    xtSlabs = [];
-    xtSlabCounter = 0;
-    xtSlabMixtures = {}; // Clear mixture data
-    
+// Preserve existing slab lengths for slabs #1 and #2
+var existingDriverLength = xtSlabs[0] ? xtSlabs[0].length : 3; // Default 3m for driver
+var existingDrivenLength = xtSlabs[1] ? xtSlabs[1].length : 6; // Default 6m for driven
+
+// Store any additional slabs beyond #2
+var additionalSlabs = xtSlabs.slice(2);
+
+// Clear only the first two slabs
+xtSlabs = [];
+xtSlabCounter = 0;
+xtSlabMixtures = {}; // Clear mixture data
+
     // Suppress rendering during batch import
     xtSuppressRender = true;
     
@@ -2372,10 +2379,10 @@ function useCurrentCalculation() {
     var drivenP = parseFloat(document.Shock.pinit.value);
     var drivenT = parseFloat(document.Shock.tinit.value);
     
-    // Add driver slab
+    // Add driver slab with preserved length
     if (driverGasId === 'custom') {
         // Import driver custom mixture - capture ID AFTER adding slab
-        addXTSlab({ gas: 'custom_mixture', pressure: driverP, temperature: driverT, length: 3 });
+        addXTSlab({ gas: 'custom_mixture', pressure: driverP, temperature: driverT, length: existingDriverLength });
         var driverSlabId = xtSlabs[xtSlabs.length - 1].id;
         
         // Copy mixture composition from shock tube calculator
@@ -2395,13 +2402,13 @@ function useCurrentCalculation() {
             }
         }
     } else {
-        addXTSlab({ gas: driverGasId, pressure: driverP, temperature: driverT, length: 3 });
+        addXTSlab({ gas: driverGasId, pressure: driverP, temperature: driverT, length: existingDriverLength });
     }
     
-    // Add driven slab
+    // Add driven slab with preserved length
     if (drivenGasId === 'custom') {
         // Import driven custom mixture - capture ID AFTER adding slab
-        addXTSlab({ gas: 'custom_mixture', pressure: drivenP, temperature: drivenT, length: 6 });
+        addXTSlab({ gas: 'custom_mixture', pressure: drivenP, temperature: drivenT, length: existingDrivenLength });
         var drivenSlabId = xtSlabs[xtSlabs.length - 1].id;
         
         // Copy mixture composition from shock tube calculator
@@ -2421,7 +2428,12 @@ function useCurrentCalculation() {
             }
         }
     } else {
-        addXTSlab({ gas: drivenGasId, pressure: drivenP, temperature: drivenT, length: 6 });
+        addXTSlab({ gas: drivenGasId, pressure: drivenP, temperature: drivenT, length: existingDrivenLength });
+    }
+    
+    // Restore any additional slabs beyond #2
+    for (var i = 0; i < additionalSlabs.length; i++) {
+        xtSlabs.push(additionalSlabs[i]);
     }
     
     // Re-enable rendering and render once with all data ready
