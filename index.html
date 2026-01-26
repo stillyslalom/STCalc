@@ -2733,11 +2733,17 @@ function runXTSimulation() {
         
         setTimeout(function() {
             try {
+                // Capture wall time
+                var wallStartTime = performance.now();
+                
                 xtSolver.run(function(progress) {
                     var percent = Math.round(progress * 100);
                     document.getElementById('xtProgressFill').style.width = percent + '%';
                     document.getElementById('xtProgressFill').textContent = percent + '%';
                 });
+                
+                var wallEndTime = performance.now();
+                xtSolver.wallTime = (wallEndTime - wallStartTime) / 1000; // Convert to seconds
                 
                 xtResults = xtSolver.getResults();
                 xtVisualization.setData(xtResults);
@@ -2770,27 +2776,14 @@ function displayXTStatistics(results) {
     var container = document.getElementById('xtStatsContent');
     var totalLength = results.x[results.x.length - 1];
     var numSnapshots = results.xtData.length;
-    
-    // Get interface method name
-    var methodName = 'Sharp Interface';
-    if (xtSolver && xtSolver.interfaceMethod) {
-        if (xtSolver.interfaceMethod === 'sharp') {
-            methodName = 'Sharp Interface';
-        } else if (xtSolver.interfaceMethod === 'ghost') {
-            methodName = 'Ghost Fluid';
-        } else if (xtSolver.interfaceMethod === 'mixed') {
-            methodName = 'Mixed-Cell';
-        }
-    }
+    var wallTime = results.wallTime || 0;
     
     container.innerHTML = 
         '<div><div style="font-weight:600;color:#495057;">Time Steps</div><div style="font-size:18px;">' + results.timeSteps.toLocaleString() + '</div></div>' +
         '<div><div style="font-weight:600;color:#495057;">Final Time</div><div style="font-size:18px;">' + (results.t * 1000).toFixed(2) + ' ms</div></div>' +
-        '<div><div style="font-weight:600;color:#495057;">Interface Method</div><div style="font-size:18px;">' + methodName + '</div></div>' +
+        '<div><div style="font-weight:600;color:#495057;">Wall Time</div><div style="font-size:18px;">' + wallTime.toFixed(2) + ' s</div></div>' +
         '<div><div style="font-weight:600;color:#495057;">X-T Snapshots</div><div style="font-size:18px;">' + numSnapshots + '</div></div>' +
-        '<div><div style="font-weight:600;color:#495057;">Domain Length</div><div style="font-size:18px;">' + totalLength.toFixed(2) + ' m</div></div>' +
-        '<div><div style="font-weight:600;color:#495057;">Grid Points</div><div style="font-size:18px;">' + results.x.length + '</div></div>' +
-        '<div><div style="font-weight:600;color:#495057;">Interfaces Tracked</div><div style="font-size:18px;">' + results.tracers.length + '</div></div>';
+        '<div><div style="font-weight:600;color:#495057;">Domain Length</div><div style="font-size:18px;">' + totalLength.toFixed(2) + ' m</div></div>';
     
     document.getElementById('xtStatsContainer').style.display = 'block';
 }

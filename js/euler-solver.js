@@ -653,7 +653,8 @@ class EulerSolver {
             T: Array.from(this.T),
             xtData: this.xtData,
             tracers: this.tracers,
-            timeSteps: this.timeSteps
+            timeSteps: this.timeSteps,
+            wallTime: this.wallTime || 0
         };
     }
 }
