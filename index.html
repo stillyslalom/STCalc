@@ -1942,6 +1942,14 @@ Approximate driver pressure (<input maxlength="5" name="areafact" size="5" value
   <h3 style="margin-top: 25px;">Simulation Parameters</h3>
   
   <div class="form-group">
+    <label for="xtIntegrator">Time Integrator:</label>
+    <select id="xtIntegrator" style="width: 100px;">
+      <option value="RK2">RK2</option>
+      <option value="SSP">SSP</option>
+    </select>
+  </div>
+
+  <div class="form-group">
     <label for="xtGridPoints">Grid Points:</label>
     <input type="number" id="xtGridPoints" value="500" min="100" max="2000" step="50" style="width: 100px;">
     <span style="font-size: 12px; color: #6c757d; margin-left: 8px;">(100-2000, affects computation time)</span>
@@ -1962,7 +1970,7 @@ Approximate driver pressure (<input maxlength="5" name="areafact" size="5" value
   <div class="form-group">
     <label for="xtCflNumber">CFL Number:</label>
     <input type="number" id="xtCflNumber" value="0.4" min="0.1" max="0.9" step="0.05" style="width: 100px;">
-    <span style="font-size: 12px; color: #6c757d; margin-left: 8px;">(stability parameter, 0.4 recommended)</span>
+    <span style="font-size: 12px; color: #6c757d; margin-left: 8px;">(stability parameter, 0.4 recommended for RK2, 0.8 for SSP)</span>
   </div>
   
   <!-- Simulation Controls -->
@@ -2215,6 +2223,7 @@ window.onclick = function(event) {
 
 <!-- Load X-T Diagram JavaScript -->
 <script src="js/xt-mixture.js"></script>
+<script src="js/time-integrators.js"></script>
 <script src="js/euler-solver.js"></script>
 <script src="js/xt-visualization.js"></script>
 
@@ -2654,6 +2663,7 @@ function runXTSimulation() {
     document.getElementById('xtCanvasContainer').style.display = 'none';
     document.getElementById('xtStatsContainer').style.display = 'none';
     
+    var integrator = document.getElementById('xtIntegrator').value;
     var nx = parseInt(document.getElementById('xtGridPoints').value);
     var simTime = parseFloat(document.getElementById('xtSimTime').value) / 1000;
     var snapshotInterval = parseFloat(document.getElementById('xtSnapshotInterval').value) / 1000;
@@ -2683,7 +2693,8 @@ function runXTSimulation() {
         nx: nx,
         finalTime: simTime,
         cfl: cfl,
-        xtInterval: snapshotInterval
+        xtInterval: snapshotInterval,
+        integrator: integrator
     });
     
     try {
