@@ -9,25 +9,18 @@ class EulerSolver {
         this.cfl = config.cfl || 0.4;  // CFL number for stability
         this.finalTime = config.finalTime || 0.02;  // Final simulation time (seconds)
         
-        this.integrator = config.integrator || 'RK2';  // Time integrator: 'RK2' or 'SSP'
+        // Create time integrator instance
+        this.integrator = IntegratorFactory.create(config.integrator || 'RK2');
 
         // Initialize arrays using typed arrays for performance
         this.x = new Float64Array(this.nx);  // Cell centers
         this.dx = 0;  // Grid spacing (set during initialization)
         
-        if (this.integrator === 'RK2') {
-        // Conservative variables: [rho, rho*u, E]
-        this.U = new Float64Array(this.nx * 3);
-        this.Un = new Float64Array(this.nx * 3);  // Next time step
-        this.Uk = new Float64Array(this.nx * 3);  // RK stage
-        } else {
-        // Conservative variables: [rho, rho*u, E]
-        this.U = new Float64Array(this.nx * 3);
-        this.U1 = new Float64Array(this.nx * 3);  // Next time step
-        this.U2 = new Float64Array(this.nx * 3);  // Next time step
-        this.U3 = new Float64Array(this.nx * 3);  // Next time step
-        this.Un = new Float64Array(this.nx * 3);  // SSP stage
-        }
+        // Initialize conservative variable buffers based on integrator requirements
+        // All integrators now use the same 3-buffer structure: U, Un, Uk
+        this.U = new Float64Array(this.nx * 3);   // Current state
+        this.Un = new Float64Array(this.nx * 3);  // Storage buffer
+        this.Uk = new Float64Array(this.nx * 3);  // Work buffer
         
         // Primitive variables for output
         this.rho = new Float64Array(this.nx);
@@ -296,140 +289,6 @@ class EulerSolver {
         }
     }
     
-    /**
-     * Take one time step using RK2
-     */
-    step() {
-        // Stage 1: compute flux and update
-        const maxWaveSpeed = this.computeFluxes();
-        
-        // Adaptive time step based on CFL condition
-        this.dt = this.cfl * this.dx / maxWaveSpeed;
-        
-        // Don't overshoot final time
-        if (this.t + this.dt > this.finalTime) {
-            this.dt = this.finalTime - this.t;
-        }
-        
-        // RK Stage 1: U* = U^n + dt * L(U^n)
-        this.updateConservative(this.U, this.Uk, this.dt);
-        
-        // Stage 2: compute flux from U*
-        // Copy Uk to U temporarily for flux computation
-        for (let i = 0; i < this.nx * 3; i++) {
-            this.Un[i] = this.U[i];
-            this.U[i] = this.Uk[i];
-        }
-        
-        this.computeFluxes();
-        
-        // RK Stage 2: U^{n+1} = 0.5 * U^n + 0.5 * (U* + dt * L(U*))
-        this.updateConservative(this.Uk, this.Uk, this.dt);
-        
-        for (let i = 0; i < this.nx * 3; i++) {
-            this.U[i] = 0.5 * this.Un[i] + 0.5 * this.Uk[i];
-        }
-        
-        // Update time and step counter
-        this.t += this.dt;
-        this.timeSteps++;
-        
-        // Update primitive variables
-        this.updatePrimitives();
-        
-        // Update Lagrangian tracers
-        this.updateTracers();
-        
-        // Update gas properties based on interface positions (sharp interface tracking)
-        this.updateGasProperties();
-        
-        // Store x-t data if needed
-        if (this.t >= this.nextXTStore) {
-            this.storeXTData();
-            this.nextXTStore += this.xtInterval;
-        }
-    }
-
-    step_SSP() {
-        // Stage 1: compute flux and update
-        const maxWaveSpeed = this.computeFluxes();
-        
-        // Adaptive time step based on CFL condition
-        this.dt = this.cfl * this.dx / maxWaveSpeed;
-        
-        // Don't overshoot final time
-        if (this.t + this.dt > this.finalTime) {
-            this.dt = this.finalTime - this.t;
-        }
-        
-        // RK Stage 1: U* = U^n + dt * L(U^n)
-        this.updateConservative(this.U, this.U1, this.dt);
-
-        for (let i = 0; i < this.nx * 3; i++) {
-            this.U1[i] = 0.5*this.U[i] + 0.5*this.U1[i];
-        }
-
-        for (let i = 0; i < this.nx * 3; i++) {
-            this.Un[i] = this.U[i];
-            this.U[i] = this.U1[i];
-        } 
-        
-        // Stage 2: compute flux from U*
-        // Copy Uk to U temporarily for flux computation
-        
-        this.computeFluxes();
-        // RK Stage 2: U^{n+1} = 0.5 * U^n + 0.5 * (U* + dt * L(U*))
-        this.updateConservative(this.U1, this.U2, this.dt);
-
-        for (let i = 0; i < this.nx * 3; i++) {
-            this.U2[i] = 0.5*this.U1[i] + 0.5*this.U2[i];
-        }
-
-        for (let i = 0; i < this.nx * 3; i++) {
-            this.U[i] = this.U2[i];
-        } 
-
-        // Stage 3: compute flux from U*
-        // Copy Uk to U temporarily for flux computation
-        
-        this.computeFluxes();
-        // RK Stage 2: U^{n+1} = 0.5 * U^n + 0.5 * (U* + dt * L(U*))
-        this.updateConservative(this.U2, this.U3, this.dt);
-
-        for (let i = 0; i < this.nx * 3; i++) {
-            this.U3[i] = (2/3)*this.Un[i] + (1/6)*this.U2[i] + (1/6)*this.U3[i];
-        }
-
-        // Stage 4: compute flux from U*
-        // Copy Uk to U temporarily for flux computation
-        
-        this.computeFluxes();
-        // RK Stage 2: U^{n+1} = 0.5 * U^n + 0.5 * (U* + dt * L(U*))
-        this.updateConservative(this.U3, this.Un, this.dt);
-        
-        for (let i = 0; i < this.nx * 3; i++) {
-            this.U[i] = 0.5 * this.U3[i] + 0.5 * this.Un[i];
-        }
-        
-        // Update time and step counter
-        this.t += this.dt;
-        this.timeSteps++;
-        
-        // Update primitive variables
-        this.updatePrimitives();
-        
-        // Update Lagrangian tracers
-        this.updateTracers();
-        
-        // Update gas properties based on interface positions (sharp interface tracking)
-        this.updateGasProperties();
-        
-        // Store x-t data if needed
-        if (this.t >= this.nextXTStore) {
-            this.storeXTData();
-            this.nextXTStore += this.xtInterval;
-        }
-    }
     
     /**
      * Update gas properties in each cell based on interface positions
@@ -512,12 +371,8 @@ class EulerSolver {
         let lastProgressUpdate = startTime;
         
         while (this.t < this.finalTime) {
-            
-            if (this.integrator === 'RK2') {
-                this.step();
-            } else {
-                this.step_SSP();
-            }
+            // Delegate time stepping to the integrator
+            this.integrator.step(this);
             
             // Update progress every 100ms
             const now = Date.now();
