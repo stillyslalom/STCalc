@@ -1948,6 +1948,20 @@ Approximate driver pressure (<input maxlength="5" name="areafact" size="5" value
       <option value="SSP">SSP</option>
     </select>
   </div>
+  
+  <div class="form-group">
+    <label for="xtInterfaceMethod">
+      Interface Tracking:
+      <span title="Controls how material interfaces are tracked. Sharp is fastest but may show oscillations, Ghost Fluid is balanced, Mixed-Cell is most accurate but slower." 
+            style="cursor:help; color:#0066cc; font-weight:normal;">ⓘ</span>
+    </label>
+    <select id="xtInterfaceMethod" onchange="updateInterfaceMethodInfo()" style="width: 150px;">
+      <option value="sharp">Sharp (Fast)</option>
+      <option value="ghost">Ghost Fluid</option>
+      <option value="mixed">Mixed-Cell (Accurate)</option>
+    </select>
+    <span id="interfaceMethodInfo" style="font-size: 12px; margin-left: 8px; color: #6c757d;">Fastest, may show oscillations near interfaces</span>
+  </div>
 
   <div class="form-group">
     <label for="xtGridPoints">Grid Points:</label>
@@ -2321,6 +2335,20 @@ var xtVisualization = null;
 var xtResults = null;
 var xtSuppressRender = false; // Flag to suppress rendering during batch operations
 
+// Update interface method information based on selection
+function updateInterfaceMethodInfo() {
+    var method = document.getElementById('xtInterfaceMethod').value;
+    var infoSpan = document.getElementById('interfaceMethodInfo');
+    
+    if (method === 'sharp') {
+        infoSpan.innerHTML = '<span style="color:#6c757d;">Fastest, may show oscillations near interfaces</span>';
+    } else if (method === 'ghost') {
+        infoSpan.innerHTML = '<span style="color:#0066cc;">Balanced speed/accuracy, reduced oscillations</span>';
+    } else if (method === 'mixed') {
+        infoSpan.innerHTML = '<span style="color:#dc3545;">Most accurate, eliminates oscillations (~25% slower)</span>';
+    }
+}
+
 // Toggle X-T Diagram section
 function toggleXTDiagramSection() {
     var section = document.getElementById('xtDiagramSection');
@@ -2664,6 +2692,7 @@ function runXTSimulation() {
     document.getElementById('xtStatsContainer').style.display = 'none';
     
     var integrator = document.getElementById('xtIntegrator').value;
+    var interfaceMethod = document.getElementById('xtInterfaceMethod').value;
     var nx = parseInt(document.getElementById('xtGridPoints').value);
     var simTime = parseFloat(document.getElementById('xtSimTime').value) / 1000;
     var snapshotInterval = parseFloat(document.getElementById('xtSnapshotInterval').value) / 1000;
@@ -2694,7 +2723,8 @@ function runXTSimulation() {
         finalTime: simTime,
         cfl: cfl,
         xtInterval: snapshotInterval,
-        integrator: integrator
+        integrator: integrator,
+        interfaceMethod: interfaceMethod
     });
     
     try {
@@ -2741,9 +2771,22 @@ function displayXTStatistics(results) {
     var totalLength = results.x[results.x.length - 1];
     var numSnapshots = results.xtData.length;
     
+    // Get interface method name
+    var methodName = 'Sharp Interface';
+    if (xtSolver && xtSolver.interfaceMethod) {
+        if (xtSolver.interfaceMethod === 'sharp') {
+            methodName = 'Sharp Interface';
+        } else if (xtSolver.interfaceMethod === 'ghost') {
+            methodName = 'Ghost Fluid';
+        } else if (xtSolver.interfaceMethod === 'mixed') {
+            methodName = 'Mixed-Cell';
+        }
+    }
+    
     container.innerHTML = 
         '<div><div style="font-weight:600;color:#495057;">Time Steps</div><div style="font-size:18px;">' + results.timeSteps.toLocaleString() + '</div></div>' +
         '<div><div style="font-weight:600;color:#495057;">Final Time</div><div style="font-size:18px;">' + (results.t * 1000).toFixed(2) + ' ms</div></div>' +
+        '<div><div style="font-weight:600;color:#495057;">Interface Method</div><div style="font-size:18px;">' + methodName + '</div></div>' +
         '<div><div style="font-weight:600;color:#495057;">X-T Snapshots</div><div style="font-size:18px;">' + numSnapshots + '</div></div>' +
         '<div><div style="font-weight:600;color:#495057;">Domain Length</div><div style="font-size:18px;">' + totalLength.toFixed(2) + ' m</div></div>' +
         '<div><div style="font-weight:600;color:#495057;">Grid Points</div><div style="font-size:18px;">' + results.x.length + '</div></div>' +

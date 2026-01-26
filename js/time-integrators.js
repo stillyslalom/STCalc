@@ -86,10 +86,15 @@ class TimeIntegrator {
         // Update primitive variables
         solver.updatePrimitives();
         
-        // Update Lagrangian tracers
+        // Advect material fractions if using mixed-cell method
+        if (solver.interfaceMethod === 'mixed') {
+            solver.advectMaterialFractions(solver.dt);
+        }
+        
+        // Update Lagrangian tracers (used by sharp and ghost methods)
         solver.updateTracers();
         
-        // Update gas properties based on interface positions (sharp interface tracking)
+        // Update gas properties based on interface tracking method
         solver.updateGasProperties();
         
         // Store x-t data if we've hit the target time (within numerical tolerance)

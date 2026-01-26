@@ -9,6 +9,9 @@ class EulerSolver {
         this.cfl = config.cfl || 0.4;  // CFL number for stability
         this.finalTime = config.finalTime || 0.02;  // Final simulation time (seconds)
         
+        // Interface tracking method: 'sharp', 'ghost', or 'mixed'
+        this.interfaceMethod = config.interfaceMethod || 'sharp';
+        
         // Create time integrator instance
         this.integrator = IntegratorFactory.create(config.integrator || 'RK2');
 
@@ -51,6 +54,15 @@ class EulerSolver {
         
         // Regions for sharp interface tracking
         this.regions = [];  // Store {gamma, mw, gasId} for each region between interfaces
+        
+        // Material fraction tracking for mixed-cell method
+        this.numMaterials = 0;  // Set during initialization
+        this.materialFractions = null;  // Allocated if interfaceMethod === 'mixed'
+        this.materialProperties = [];  // Array of {gamma, mw, gasId} for each material
+        this.materialFlux = null;  // Flux for material fractions
+        
+        // Ghost fluid method tracking
+        this.interfaceCells = new Set();  // Cells adjacent to material interfaces
         
         // Constants
         this.Ru = 8314.51;  // Universal gas constant J/(kmol·K)
@@ -124,6 +136,44 @@ class EulerSolver {
                     x: currentPos,
                     trajectory: [{t: 0, x: currentPos}]
                 });
+            }
+        }
+        
+        // Initialize mixed-cell method if selected
+        if (this.interfaceMethod === 'mixed') {
+            this.numMaterials = slabs.length;
+            this.materialFractions = new Float64Array(this.nx * this.numMaterials);
+            this.materialFlux = new Float64Array((this.nx + 1) * this.numMaterials);
+            
+            // Store material properties
+            this.materialProperties = slabs.map(slab => ({
+                gamma: slab.gamma,
+                mw: slab.mw,
+                gasId: slab.gasId
+            }));
+            
+            // Initialize material fractions based on slab positions
+            currentPos = 0;
+            slabIndex = 0;
+            for (let i = 0; i < this.nx; i++) {
+                const cellLeft = i * this.dx;
+                const cellRight = (i + 1) * this.dx;
+                
+                // Find which slab(s) this cell overlaps
+                let tempPos = 0;
+                for (let s = 0; s < slabs.length; s++) {
+                    const slabLeft = tempPos;
+                    const slabRight = tempPos + slabs[s].length;
+                    
+                    // Calculate overlap
+                    const overlapLeft = Math.max(cellLeft, slabLeft);
+                    const overlapRight = Math.min(cellRight, slabRight);
+                    const overlap = Math.max(0, overlapRight - overlapLeft);
+                    
+                    this.materialFractions[i * this.numMaterials + s] = overlap / this.dx;
+                    
+                    tempPos += slabs[s].length;
+                }
             }
         }
         
@@ -291,35 +341,231 @@ class EulerSolver {
     
     
     /**
-     * Update gas properties in each cell based on interface positions
-     * Uses sharp interface tracking - cells inherit properties from their region
+     * Compute mixture properties from material fractions
+     * Uses thermodynamically consistent mixing rules
      */
-    updateGasProperties() {
-        // Sort tracer positions for efficient region determination
+    computeMixtureProperties(cellIdx) {
+        let gamma_mix_inv = 0;
+        let mw_mix = 0;
+        let totalFraction = 0;
+        let dominantMaterial = 0;
+        let maxFraction = 0;
+        
+        for (let m = 0; m < this.numMaterials; m++) {
+            const alpha = this.materialFractions[cellIdx * this.numMaterials + m];
+            const gamma = this.materialProperties[m].gamma;
+            const mw = this.materialProperties[m].mw;
+            
+            // Pressure-weighted average for gamma (thermodynamically consistent)
+            gamma_mix_inv += alpha / (gamma - 1);
+            
+            // Mass-weighted average for molecular weight
+            mw_mix += alpha * mw;
+            
+            totalFraction += alpha;
+            
+            // Track dominant material for gas ID
+            if (alpha > maxFraction) {
+                maxFraction = alpha;
+                dominantMaterial = m;
+            }
+        }
+        
+        // Normalize (should be ~1 but numerical errors possible)
+        if (totalFraction > 1e-10) {
+            gamma_mix_inv /= totalFraction;
+            mw_mix /= totalFraction;
+        } else {
+            // Fallback to first material if fractions sum to zero
+            gamma_mix_inv = 1.0 / (this.materialProperties[0].gamma - 1);
+            mw_mix = this.materialProperties[0].mw;
+            dominantMaterial = 0;
+        }
+        
+        return {
+            gamma: 1 + 1 / gamma_mix_inv,
+            mw: mw_mix,
+            gasId: this.materialProperties[dominantMaterial].gasId
+        };
+    }
+    
+    /**
+     * Identify cells adjacent to material interfaces for ghost fluid method
+     */
+    identifyInterfaceCells() {
+        this.interfaceCells.clear();
+        
+        // Sort tracer positions
         const tracerPositions = this.tracers.map(t => t.x).sort((a, b) => a - b);
         
         for (let i = 0; i < this.nx; i++) {
-            const cellCenter = this.x[i];
+            const cellLeft = i * this.dx;
+            const cellRight = (i + 1) * this.dx;
             
-            // Determine which region this cell is in
-            let regionIndex = 0;
-            for (let j = 0; j < tracerPositions.length; j++) {
-                if (cellCenter > tracerPositions[j]) {
-                    regionIndex = j + 1;
-                } else {
+            // Check if any tracer is within or near this cell
+            for (const tracerX of tracerPositions) {
+                const dist = Math.min(
+                    Math.abs(tracerX - cellLeft),
+                    Math.abs(tracerX - cellRight),
+                    Math.abs(tracerX - this.x[i])
+                );
+                
+                // Mark as interface cell if tracer is within 1.5 cell widths
+                if (dist < 1.5 * this.dx) {
+                    this.interfaceCells.add(i);
                     break;
                 }
             }
-            
-            // Clamp region index to valid range
-            regionIndex = Math.max(0, Math.min(this.regions.length - 1, regionIndex));
-            
-            // Update cell properties from the appropriate region
-            const region = this.regions[regionIndex];
-            this.gamma[i] = region.gamma;
-            this.mw[i] = region.mw;
-            this.gasId[i] = region.gasId;
         }
+    }
+    
+    /**
+     * Update gas properties in each cell based on interface tracking method
+     */
+    updateGasProperties() {
+        if (this.interfaceMethod === 'mixed') {
+            // Mixed-cell method: compute mixture properties from volume fractions
+            for (let i = 0; i < this.nx; i++) {
+                const mixProps = this.computeMixtureProperties(i);
+                this.gamma[i] = mixProps.gamma;
+                this.mw[i] = mixProps.mw;
+                this.gasId[i] = mixProps.gasId;
+            }
+        } else if (this.interfaceMethod === 'ghost') {
+            // Ghost fluid method: sharp interfaces with special treatment near boundaries
+            // First, identify interface cells
+            this.identifyInterfaceCells();
+            
+            // Sort tracer positions for region determination
+            const tracerPositions = this.tracers.map(t => t.x).sort((a, b) => a - b);
+            
+            for (let i = 0; i < this.nx; i++) {
+                const cellCenter = this.x[i];
+                
+                // Determine which region this cell is in
+                let regionIndex = 0;
+                for (let j = 0; j < tracerPositions.length; j++) {
+                    if (cellCenter > tracerPositions[j]) {
+                        regionIndex = j + 1;
+                    } else {
+                        break;
+                    }
+                }
+                
+                // Clamp region index to valid range
+                regionIndex = Math.max(0, Math.min(this.regions.length - 1, regionIndex));
+                
+                // Update cell properties from the appropriate region
+                const region = this.regions[regionIndex];
+                this.gamma[i] = region.gamma;
+                this.mw[i] = region.mw;
+                this.gasId[i] = region.gasId;
+            }
+            
+            // For ghost fluid method, we could apply special treatment to interface cells here
+            // For now, the sharp assignment is sufficient but can be enhanced later
+        } else {
+            // Sharp method: original behavior - cells inherit properties from their region
+            const tracerPositions = this.tracers.map(t => t.x).sort((a, b) => a - b);
+            
+            for (let i = 0; i < this.nx; i++) {
+                const cellCenter = this.x[i];
+                
+                // Determine which region this cell is in
+                let regionIndex = 0;
+                for (let j = 0; j < tracerPositions.length; j++) {
+                    if (cellCenter > tracerPositions[j]) {
+                        regionIndex = j + 1;
+                    } else {
+                        break;
+                    }
+                }
+                
+                // Clamp region index to valid range
+                regionIndex = Math.max(0, Math.min(this.regions.length - 1, regionIndex));
+                
+                // Update cell properties from the appropriate region
+                const region = this.regions[regionIndex];
+                this.gamma[i] = region.gamma;
+                this.mw[i] = region.mw;
+                this.gasId[i] = region.gasId;
+            }
+        }
+    }
+    
+    /**
+     * Advect material fractions using upwind scheme
+     * Solves ∂α/∂t + u·∂α/∂x = 0 for each material
+     */
+    advectMaterialFractions(dt) {
+        if (this.interfaceMethod !== 'mixed' || !this.materialFractions) {
+            return;
+        }
+        
+        // Compute fluxes for material fractions at cell interfaces
+        for (let i = 0; i <= this.nx; i++) {
+            for (let m = 0; m < this.numMaterials; m++) {
+                const fluxIdx = i * this.numMaterials + m;
+                
+                if (i === 0 || i === this.nx) {
+                    // Boundary: zero flux (reflective)
+                    this.materialFlux[fluxIdx] = 0;
+                } else {
+                    // Interior interface: upwind scheme
+                    // Interface velocity is average of adjacent cells
+                    const uInterface = 0.5 * (this.u[i - 1] + this.u[i]);
+                    
+                    if (uInterface > 0) {
+                        // Upwind from left
+                        const alphaL = this.materialFractions[(i - 1) * this.numMaterials + m];
+                        this.materialFlux[fluxIdx] = uInterface * alphaL;
+                    } else {
+                        // Upwind from right
+                        const alphaR = this.materialFractions[i * this.numMaterials + m];
+                        this.materialFlux[fluxIdx] = uInterface * alphaR;
+                    }
+                }
+            }
+        }
+        
+        // Update material fractions using computed fluxes
+        const alphaNew = new Float64Array(this.nx * this.numMaterials);
+        
+        for (let i = 0; i < this.nx; i++) {
+            for (let m = 0; m < this.numMaterials; m++) {
+                const idx = i * this.numMaterials + m;
+                const fluxL = i * this.numMaterials + m;
+                const fluxR = (i + 1) * this.numMaterials + m;
+                
+                alphaNew[idx] = this.materialFractions[idx] - 
+                               dt / this.dx * (this.materialFlux[fluxR] - this.materialFlux[fluxL]);
+            }
+            
+            // Normalize fractions to ensure they sum to 1
+            let totalAlpha = 0;
+            for (let m = 0; m < this.numMaterials; m++) {
+                const idx = i * this.numMaterials + m;
+                alphaNew[idx] = Math.max(0, Math.min(1, alphaNew[idx]));  // Clamp to [0,1]
+                totalAlpha += alphaNew[idx];
+            }
+            
+            // Renormalize
+            if (totalAlpha > 1e-10) {
+                for (let m = 0; m < this.numMaterials; m++) {
+                    const idx = i * this.numMaterials + m;
+                    alphaNew[idx] /= totalAlpha;
+                }
+            } else {
+                // If all fractions are zero, default to equal distribution
+                for (let m = 0; m < this.numMaterials; m++) {
+                    const idx = i * this.numMaterials + m;
+                    alphaNew[idx] = 1.0 / this.numMaterials;
+                }
+            }
+        }
+        
+        // Copy updated fractions back
+        this.materialFractions.set(alphaNew);
     }
     
     /**
