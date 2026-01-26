@@ -44,6 +44,37 @@ class TimeIntegrator {
     }
 
     /**
+     * Calculate time step with visualization synchronization
+     * Adjusts dt to hit visualization times exactly by reducing timestep
+     * when approaching a snapshot time.
+     * 
+     * @param {EulerSolver} solver - The solver instance
+     * @param {number} maxWaveSpeed - Maximum wave speed from flux calculation
+     * @returns {number} - The adjusted time step
+     */
+    calculateTimeStep(solver, maxWaveSpeed) {
+        // Normal CFL-based time step
+        let dt = solver.cfl * solver.dx / maxWaveSpeed;
+        
+        // Don't overshoot final time
+        if (solver.t + dt > solver.finalTime) {
+            dt = solver.finalTime - solver.t;
+        }
+        
+        // Check if we're approaching a visualization time
+        const timeToNextViz = solver.nextXTStore - solver.t;
+        
+        if (timeToNextViz > 0 && timeToNextViz < 2.5 * dt) {
+            // We're close to visualization time - adjust dt to hit it exactly
+            // Use integer number of substeps for accuracy
+            const numSubsteps = Math.max(1, Math.ceil(timeToNextViz / dt));
+            dt = timeToNextViz / numSubsteps;
+        }
+        
+        return dt;
+    }
+
+    /**
      * Common post-step operations
      * @param {EulerSolver} solver - The Euler solver instance
      */
@@ -61,8 +92,8 @@ class TimeIntegrator {
         // Update gas properties based on interface positions (sharp interface tracking)
         solver.updateGasProperties();
         
-        // Store x-t data if needed
-        if (solver.t >= solver.nextXTStore) {
+        // Store x-t data if we've hit the target time (within numerical tolerance)
+        if (Math.abs(solver.t - solver.nextXTStore) < 1e-10 || solver.t > solver.nextXTStore) {
             solver.storeXTData();
             solver.nextXTStore += solver.xtInterval;
         }
@@ -102,13 +133,8 @@ class RK2Integrator extends TimeIntegrator {
         // Stage 1: compute flux and update
         const maxWaveSpeed = solver.computeFluxes();
         
-        // Adaptive time step based on CFL condition
-        solver.dt = solver.cfl * solver.dx / maxWaveSpeed;
-        
-        // Don't overshoot final time
-        if (solver.t + solver.dt > solver.finalTime) {
-            solver.dt = solver.finalTime - solver.t;
-        }
+        // Calculate time step with visualization synchronization
+        solver.dt = this.calculateTimeStep(solver, maxWaveSpeed);
         
         // RK Stage 1: U* = U^n + dt * L(U^n)
         solver.updateConservative(solver.U, solver.Uk, solver.dt);
@@ -183,13 +209,8 @@ class SSPIntegrator extends TimeIntegrator {
         // Compute initial flux and time step
         const maxWaveSpeed = solver.computeFluxes();
         
-        // Adaptive time step based on CFL condition
-        solver.dt = solver.cfl * solver.dx / maxWaveSpeed;
-        
-        // Don't overshoot final time
-        if (solver.t + solver.dt > solver.finalTime) {
-            solver.dt = solver.finalTime - solver.t;
-        }
+        // Calculate time step with visualization synchronization
+        solver.dt = this.calculateTimeStep(solver, maxWaveSpeed);
         
         const n = solver.nx * 3;
         
