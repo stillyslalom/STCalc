@@ -1929,7 +1929,7 @@ Approximate driver pressure (<input maxlength="5" name="areafact" size="5" value
   <p style="font-size: 14px; color: #6c757d;">Define the initial gas slabs in the shock tube. Slabs are ordered from left to right (driver first, then driven).</p>
   
   <div style="margin-bottom: 15px;">
-    <button type="button" onclick="useCurrentCalculation()" style="background-color: #28a745; border-color: #28a745;">Use Current Calculation</button>
+    <button type="button" onclick="useCurrentCalculation()" style="background-color: #28a745; border-color: #28a745;">Use Driver/Driven States from 0D Calculation</button>
     <span id="xtImportInfo" style="margin-left: 10px; font-size: 13px; color: #28a745;"></span>
     <span id="xtImportWarning" style="margin-left: 10px; font-size: 13px; color: #dc3545;"></span>
   </div>
@@ -2396,7 +2396,7 @@ function useCurrentCalculation() {
     // Check if calculation has been run
     var pfour = document.Shock.pfour.value;
     if (!pfour || pfour === '') {
-        document.getElementById('xtImportWarning').textContent = '⚠ Please run the shock tube calculation first.';
+        document.getElementById('xtImportWarning').textContent = '⚠ Please run the driver/driven calculation first.';
         document.getElementById('xtImportInfo').textContent = '';
         return;
     }
@@ -2501,11 +2501,22 @@ xtSlabMixtures = {}; // Clear mixture data
 // Add a gas slab
 function addXTSlab(config = {}) {
     var id = xtSlabCounter++;
+    
+    // Get defaults from preceding slab if it exists
+    var defaultPressure = 101325;  // 1 atm
+    var defaultTemperature = 300;   // K
+    
+    if (xtSlabs.length > 0) {
+        var precedingSlab = xtSlabs[xtSlabs.length - 1];
+        defaultPressure = precedingSlab.pressure;
+        defaultTemperature = precedingSlab.temperature;
+    }
+    
     var slab = {
         id: id,
         gas: config.gas || '',
-        pressure: config.pressure || 101325,
-        temperature: config.temperature || 300,
+        pressure: config.pressure || defaultPressure,
+        temperature: config.temperature || defaultTemperature,
         length: config.length || 1
     };
     
