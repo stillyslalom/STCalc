@@ -65,24 +65,98 @@ class XTVisualization {
      * Set data for visualization
      */
     setData(results) {
-        this.xtData = results.xtData;
+        this.xtDataFull = results.xtData;  // Store full resolution data
         this.tracers = results.tracers;
         
         // Determine data ranges
         this.xMin = 0;
         this.xMax = results.x[results.x.length - 1] + (results.x[1] - results.x[0]);
         this.tMin = 0;
-        this.tMax = this.xtData[this.xtData.length - 1].t;
+        this.tMax = this.xtDataFull[this.xtDataFull.length - 1].t;
         
-        // Find pressure range
+        // Find pressure range from full data
         this.pMin = Infinity;
         this.pMax = -Infinity;
-        for (let snapshot of this.xtData) {
+        for (let snapshot of this.xtDataFull) {
             for (let p of snapshot.p) {
                 this.pMin = Math.min(this.pMin, p);
                 this.pMax = Math.max(this.pMax, p);
             }
         }
+        
+        // Downsample data to canvas resolution for rendering
+        this.xtData = this.downsampleData(this.xtDataFull);
+    }
+    
+    /**
+     * Downsample X-T data to match canvas resolution
+     * Uses averaging to preserve data accuracy
+     */
+    downsampleData(fullData) {
+        const fullNx = fullData[0].p.length;
+        const fullNt = fullData.length;
+        
+        // Target resolution matches canvas pixels
+        const targetNx = Math.min(this.plotWidth, fullNx);
+        const targetNt = Math.min(this.plotHeight, fullNt);
+        
+        // If already at or below target resolution, return original data
+        if (fullNx <= targetNx && fullNt <= targetNt) {
+            console.log(`No downsampling needed: ${fullNx}×${fullNt} fits in ${targetNx}×${targetNt}`);
+            return fullData;
+        }
+        
+        console.log(`Downsampling from ${fullNx}×${fullNt} to ${targetNx}×${targetNt}`);
+        
+        const downsampled = [];
+        
+        // Calculate sampling factors
+        const spatialFactor = fullNx / targetNx;
+        const temporalFactor = fullNt / targetNt;
+        
+        // Downsample in time
+        for (let jTarget = 0; jTarget < targetNt; jTarget++) {
+            // Find source time indices to average
+            const jStart = Math.floor(jTarget * temporalFactor);
+            const jEnd = Math.min(Math.floor((jTarget + 1) * temporalFactor), fullNt);
+            const numTimeSteps = jEnd - jStart;
+            
+            // Create downsampled snapshot
+            const snapshot = {
+                t: 0,
+                p: new Float64Array(targetNx)
+            };
+            
+            // Average time values
+            for (let j = jStart; j < jEnd; j++) {
+                snapshot.t += fullData[j].t;
+            }
+            snapshot.t /= numTimeSteps;
+            
+            // Downsample in space
+            for (let iTarget = 0; iTarget < targetNx; iTarget++) {
+                // Find source spatial indices to average
+                const iStart = Math.floor(iTarget * spatialFactor);
+                const iEnd = Math.min(Math.floor((iTarget + 1) * spatialFactor), fullNx);
+                const numSpatialPoints = iEnd - iStart;
+                
+                // Average pressure over the spatial-temporal block
+                let pSum = 0;
+                let count = 0;
+                for (let j = jStart; j < jEnd; j++) {
+                    for (let i = iStart; i < iEnd; i++) {
+                        pSum += fullData[j].p[i];
+                        count++;
+                    }
+                }
+                snapshot.p[iTarget] = pSum / count;
+            }
+            
+            downsampled.push(snapshot);
+        }
+        
+        console.log(`Downsampling complete: ${downsampled.length} snapshots with ${downsampled[0].p.length} points each`);
+        return downsampled;
     }
     
     /**
@@ -325,62 +399,60 @@ class XTVisualization {
         const x = this.xMin + (this.mouseX - this.margin.left) / this.plotWidth * (this.xMax - this.xMin);
         const t = this.tMax - (this.mouseY - this.margin.top) / this.plotHeight * (this.tMax - this.tMin);
         
-        // Find nearest data point
+        // Find nearest data point in downsampled data
         const nx = this.xtData[0].p.length;
         const nt = this.xtData.length;
         
-        const iTime = Math.floor((t - this.tMin) / (this.tMax - this.tMin) * nt);
-        const iPos = Math.floor((x - this.xMin) / (this.xMax - this.xMin) * nx);
+        const iTime = Math.max(0, Math.min(nt - 1, Math.floor((t - this.tMin) / (this.tMax - this.tMin) * nt)));
+        const iPos = Math.max(0, Math.min(nx - 1, Math.floor((x - this.xMin) / (this.xMax - this.xMin) * nx)));
         
-        if (iTime >= 0 && iTime < nt && iPos >= 0 && iPos < nx) {
-            const p = this.xtData[iTime].p[iPos];
-            
-            // Draw tooltip
-            const tooltipText = `x: ${x.toFixed(3)} m, t: ${(t * 1000).toFixed(2)} ms, p: ${(p / 1000).toFixed(1)} kPa`;
-            
-            this.ctx.font = '12px Arial';
-            const textWidth = this.ctx.measureText(tooltipText).width;
-            
-            let tooltipX = this.mouseX + 10;
-            let tooltipY = this.mouseY - 10;
-            
-            // Keep tooltip in bounds
-            if (tooltipX + textWidth + 10 > this.width) {
-                tooltipX = this.mouseX - textWidth - 10;
-            }
-            if (tooltipY < 20) {
-                tooltipY = this.mouseY + 20;
-            }
-            
-            // Draw background
-            this.ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-            this.ctx.fillRect(tooltipX - 5, tooltipY - 15, textWidth + 10, 20);
-            this.ctx.strokeStyle = '#000000';
-            this.ctx.lineWidth = 1;
-            this.ctx.strokeRect(tooltipX - 5, tooltipY - 15, textWidth + 10, 20);
-            
-            // Draw text
-            this.ctx.fillStyle = '#000000';
-            this.ctx.textAlign = 'left';
-            this.ctx.fillText(tooltipText, tooltipX, tooltipY);
-            
-            // Draw crosshair
-            this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-            this.ctx.lineWidth = 1;
-            this.ctx.setLineDash([5, 5]);
-            
-            this.ctx.beginPath();
-            this.ctx.moveTo(this.margin.left, this.mouseY);
-            this.ctx.lineTo(this.margin.left + this.plotWidth, this.mouseY);
-            this.ctx.stroke();
-            
-            this.ctx.beginPath();
-            this.ctx.moveTo(this.mouseX, this.margin.top);
-            this.ctx.lineTo(this.mouseX, this.margin.top + this.plotHeight);
-            this.ctx.stroke();
-            
-            this.ctx.setLineDash([]);
+        const p = this.xtData[iTime].p[iPos];
+        
+        // Draw tooltip
+        const tooltipText = `x: ${x.toFixed(3)} m, t: ${(t * 1000).toFixed(2)} ms, p: ${(p / 1000).toFixed(1)} kPa`;
+        
+        this.ctx.font = '12px Arial';
+        const textWidth = this.ctx.measureText(tooltipText).width;
+        
+        let tooltipX = this.mouseX + 10;
+        let tooltipY = this.mouseY - 10;
+        
+        // Keep tooltip in bounds
+        if (tooltipX + textWidth + 10 > this.width) {
+            tooltipX = this.mouseX - textWidth - 10;
         }
+        if (tooltipY < 20) {
+            tooltipY = this.mouseY + 20;
+        }
+        
+        // Draw background
+        this.ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        this.ctx.fillRect(tooltipX - 5, tooltipY - 15, textWidth + 10, 20);
+        this.ctx.strokeStyle = '#000000';
+        this.ctx.lineWidth = 1;
+        this.ctx.strokeRect(tooltipX - 5, tooltipY - 15, textWidth + 10, 20);
+        
+        // Draw text
+        this.ctx.fillStyle = '#000000';
+        this.ctx.textAlign = 'left';
+        this.ctx.fillText(tooltipText, tooltipX, tooltipY);
+        
+        // Draw crosshair
+        this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+        this.ctx.lineWidth = 1;
+        this.ctx.setLineDash([5, 5]);
+        
+        this.ctx.beginPath();
+        this.ctx.moveTo(this.margin.left, this.mouseY);
+        this.ctx.lineTo(this.margin.left + this.plotWidth, this.mouseY);
+        this.ctx.stroke();
+        
+        this.ctx.beginPath();
+        this.ctx.moveTo(this.mouseX, this.margin.top);
+        this.ctx.lineTo(this.mouseX, this.margin.top + this.plotHeight);
+        this.ctx.stroke();
+        
+        this.ctx.setLineDash([]);
     }
     
     /**
