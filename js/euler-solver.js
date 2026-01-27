@@ -9,7 +9,7 @@ class EulerSolver {
         this.cfl = config.cfl || 0.4;  // CFL number for stability
         this.finalTime = config.finalTime || 0.02;  // Final simulation time (seconds)
         
-        // Interface tracking method: 'sharp', 'ghost', or 'mixed'
+        // Interface tracking method: 'sharp' or 'mixed'
         this.interfaceMethod = config.interfaceMethod || 'sharp';
         
         // Create time integrator instance
@@ -60,9 +60,6 @@ class EulerSolver {
         this.materialFractions = null;  // Allocated if interfaceMethod === 'mixed'
         this.materialProperties = [];  // Array of {gamma, mw, gasId} for each material
         this.materialFlux = null;  // Flux for material fractions
-        
-        // Ghost fluid method tracking
-        this.interfaceCells = new Set();  // Cells adjacent to material interfaces
         
         // Constants
         this.Ru = 8314.51;  // Universal gas constant J/(kmol·K)
@@ -390,36 +387,6 @@ class EulerSolver {
     }
     
     /**
-     * Identify cells adjacent to material interfaces for ghost fluid method
-     */
-    identifyInterfaceCells() {
-        this.interfaceCells.clear();
-        
-        // Sort tracer positions
-        const tracerPositions = this.tracers.map(t => t.x).sort((a, b) => a - b);
-        
-        for (let i = 0; i < this.nx; i++) {
-            const cellLeft = i * this.dx;
-            const cellRight = (i + 1) * this.dx;
-            
-            // Check if any tracer is within or near this cell
-            for (const tracerX of tracerPositions) {
-                const dist = Math.min(
-                    Math.abs(tracerX - cellLeft),
-                    Math.abs(tracerX - cellRight),
-                    Math.abs(tracerX - this.x[i])
-                );
-                
-                // Mark as interface cell if tracer is within 1.5 cell widths
-                if (dist < 1.5 * this.dx) {
-                    this.interfaceCells.add(i);
-                    break;
-                }
-            }
-        }
-    }
-    
-    /**
      * Update gas properties in each cell based on interface tracking method
      */
     updateGasProperties() {
@@ -431,41 +398,8 @@ class EulerSolver {
                 this.mw[i] = mixProps.mw;
                 this.gasId[i] = mixProps.gasId;
             }
-        } else if (this.interfaceMethod === 'ghost') {
-            // Ghost fluid method: sharp interfaces with special treatment near boundaries
-            // First, identify interface cells
-            this.identifyInterfaceCells();
-            
-            // Sort tracer positions for region determination
-            const tracerPositions = this.tracers.map(t => t.x).sort((a, b) => a - b);
-            
-            for (let i = 0; i < this.nx; i++) {
-                const cellCenter = this.x[i];
-                
-                // Determine which region this cell is in
-                let regionIndex = 0;
-                for (let j = 0; j < tracerPositions.length; j++) {
-                    if (cellCenter > tracerPositions[j]) {
-                        regionIndex = j + 1;
-                    } else {
-                        break;
-                    }
-                }
-                
-                // Clamp region index to valid range
-                regionIndex = Math.max(0, Math.min(this.regions.length - 1, regionIndex));
-                
-                // Update cell properties from the appropriate region
-                const region = this.regions[regionIndex];
-                this.gamma[i] = region.gamma;
-                this.mw[i] = region.mw;
-                this.gasId[i] = region.gasId;
-            }
-            
-            // For ghost fluid method, we could apply special treatment to interface cells here
-            // For now, the sharp assignment is sufficient but can be enhanced later
         } else {
-            // Sharp method: original behavior - cells inherit properties from their region
+            // Sharp method: cells inherit properties from their region
             const tracerPositions = this.tracers.map(t => t.x).sort((a, b) => a - b);
             
             for (let i = 0; i < this.nx; i++) {

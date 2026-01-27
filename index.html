@@ -1945,22 +1945,22 @@ Approximate driver pressure (<input maxlength="5" name="areafact" size="5" value
     <label for="xtIntegrator">Time Integrator:</label>
     <select id="xtIntegrator" style="width: 100px;">
       <option value="RK2">RK2</option>
-      <option value="SSP">SSP</option>
+      <option value="SSP" selected>SSP</option>
     </select>
+    <span style="font-size: 12px; color: #6c757d; margin-left: 8px;">(SSP recommended for stability)</span>
   </div>
   
   <div class="form-group">
     <label for="xtInterfaceMethod">
       Interface Tracking:
-      <span title="Controls how material interfaces are tracked. Sharp is fastest but may show oscillations, Ghost Fluid is balanced, Mixed-Cell is most accurate but slower." 
+      <span title="Controls how material interfaces are tracked. Sharp is fastest but may show oscillations, Mixed-Cell is most accurate but slower." 
             style="cursor:help; color:#0066cc; font-weight:normal;">ⓘ</span>
     </label>
-    <select id="xtInterfaceMethod" onchange="updateInterfaceMethodInfo()" style="width: 150px;">
+    <select id="xtInterfaceMethod" onchange="updateInterfaceMethodInfo()" style="width: 180px;">
       <option value="sharp">Sharp (Fast)</option>
-      <option value="ghost">Ghost Fluid</option>
-      <option value="mixed">Mixed-Cell (Accurate)</option>
+      <option value="mixed" selected>Mixed-Cell (Accurate)</option>
     </select>
-    <span id="interfaceMethodInfo" style="font-size: 12px; margin-left: 8px; color: #6c757d;">Fastest, may show oscillations near interfaces</span>
+    <span id="interfaceMethodInfo" style="font-size: 12px; margin-left: 8px; color: #6c757d;">Most accurate, eliminates oscillations (~15% slower)</span>
   </div>
 
   <div class="form-group">
@@ -1983,7 +1983,7 @@ Approximate driver pressure (<input maxlength="5" name="areafact" size="5" value
   
   <div class="form-group">
     <label for="xtCflNumber">CFL Number:</label>
-    <input type="number" id="xtCflNumber" value="0.4" min="0.1" max="0.9" step="0.05" style="width: 100px;">
+    <input type="number" id="xtCflNumber" value="0.8" min="0.1" max="0.9" step="0.05" style="width: 100px;">
     <span style="font-size: 12px; color: #6c757d; margin-left: 8px;">(stability parameter, 0.4 recommended for RK2, 0.8 for SSP)</span>
   </div>
   
@@ -2358,10 +2358,8 @@ function updateInterfaceMethodInfo() {
     
     if (method === 'sharp') {
         infoSpan.innerHTML = '<span style="color:#6c757d;">Fastest, may show oscillations near interfaces</span>';
-    } else if (method === 'ghost') {
-        infoSpan.innerHTML = '<span style="color:#0066cc;">Balanced speed/accuracy, reduced oscillations</span>';
     } else if (method === 'mixed') {
-        infoSpan.innerHTML = '<span style="color:#dc3545;">Most accurate, eliminates oscillations (~25% slower)</span>';
+        infoSpan.innerHTML = '<span style="color:#dc3545;">Most accurate, eliminates oscillations (~15% slower)</span>';
     }
 }
 
