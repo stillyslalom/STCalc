@@ -131,7 +131,7 @@ class EulerSolver {
             if (i < slabs.length - 1) {  // Don't add tracer at end
                 this.tracers.push({
                     x: currentPos,
-                    trajectory: [{t: 0, x: currentPos}]
+                    trajectory: [{t: 0, x: currentPos, v: 0}]
                 });
             }
         }
@@ -520,8 +520,8 @@ class EulerSolver {
             // Clamp to domain
             tracer.x = Math.max(0, Math.min(this.x[this.nx - 1] + 0.5 * this.dx, tracer.x));
             
-            // Store trajectory point
-            tracer.trajectory.push({t: this.t, x: tracer.x});
+            // Store trajectory point with velocity
+            tracer.trajectory.push({t: this.t, x: tracer.x, v: velocity});
         }
     }
     

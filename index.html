@@ -2846,13 +2846,26 @@ function resetXTSimulation() {
     document.getElementById('xtProgressContainer').style.display = 'none';
 }
 
+// Helper function to generate timestamp for filenames
+function getTimestampString() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hour = String(now.getHours()).padStart(2, '0');
+    const minute = String(now.getMinutes()).padStart(2, '0');
+    const second = String(now.getSeconds()).padStart(2, '0');
+    return `${year}${month}${day}_${hour}${minute}${second}`;
+}
+
 // Export functions
 function exportXTImage() {
     if (!xtVisualization || !xtResults) {
         showXTMessage('No simulation results to export.', 'warning');
         return;
     }
-    xtVisualization.exportImage('shock-tube-xt-diagram.png');
+    const timestamp = getTimestampString();
+    xtVisualization.exportImage(`xtcalc_${timestamp}.png`);
 }
 
 function exportXTDataCSV() {
@@ -2881,7 +2894,8 @@ function exportXTDataCSV() {
         }
     }
     
-    downloadXTCSV(csv, 'xt-diagram-data.csv');
+    const timestamp = getTimestampString();
+    downloadXTCSV(csv, `xtcalc_${timestamp}_xtdata.csv`);
 }
 
 function exportXTTracerCSV() {
@@ -2890,16 +2904,17 @@ function exportXTTracerCSV() {
         return;
     }
     
-    var csv = 'Interface,Time (ms),Position (m)\n';
+    var csv = 'Interface,Time (s),Position (m),Velocity (m/s)\n';
     for (var i = 0; i < xtResults.tracers.length; i++) {
         var tracer = xtResults.tracers[i];
         for (var j = 0; j < tracer.trajectory.length; j++) {
             var point = tracer.trajectory[j];
-            csv += (i + 1) + ',' + (point.t * 1000).toFixed(4) + ',' + point.x.toFixed(4) + '\n';
+            csv += (i + 1) + ',' + point.t + ',' + point.x + ',' + point.v + '\n';
         }
     }
     
-    downloadXTCSV(csv, 'tracer-trajectories.csv');
+    const timestamp = getTimestampString();
+    downloadXTCSV(csv, `xtcalc_${timestamp}_tracers.csv`);
 }
 
 function exportXTJSON() {
@@ -2923,7 +2938,8 @@ function exportXTJSON() {
     var url = URL.createObjectURL(blob);
     var link = document.createElement('a');
     link.href = url;
-    link.download = 'simulation-complete.json';
+    const timestamp = getTimestampString();
+    link.download = `xtcalc_${timestamp}.json`;
     link.click();
     URL.revokeObjectURL(url);
 }
@@ -3152,9 +3168,11 @@ async function exportXTDataHDF5() {
             
             const times = tracer.trajectory.map(p => p.t);
             const positions = tracer.trajectory.map(p => p.x);
+            const velocities = tracer.trajectory.map(p => p.v);
             
             f.get('tracers/' + groupName).create_dataset({name: 'times', data: times, dtype: '<d'});
             f.get('tracers/' + groupName).create_dataset({name: 'positions', data: positions, dtype: '<d'});
+            f.get('tracers/' + groupName).create_dataset({name: 'velocities', data: velocities, dtype: '<d'});
         }
         
         // Flush and close file
