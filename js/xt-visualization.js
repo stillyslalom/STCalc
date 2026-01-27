@@ -63,9 +63,12 @@ class XTVisualization {
     
     /**
      * Set data for visualization
+     * IMPORTANT: This method must NOT modify the original results.xtData
+     * as it's used for HDF5 export and other downstream processing
      */
     setData(results) {
-        this.xtDataFull = results.xtData;  // Store full resolution data
+        // Store reference to full resolution data (READ-ONLY, do not modify!)
+        this.xtDataFull = results.xtData;
         this.tracers = results.tracers;
         
         // Determine data ranges
@@ -84,13 +87,14 @@ class XTVisualization {
             }
         }
         
-        // Downsample data to canvas resolution for rendering
+        // Create downsampled copy for rendering (separate from original data)
         this.xtData = this.downsampleData(this.xtDataFull);
     }
     
     /**
      * Downsample X-T data to match canvas resolution
      * Uses averaging to preserve data accuracy
+     * IMPORTANT: Always returns a new data structure, never modifies input
      */
     downsampleData(fullData) {
         const fullNx = fullData[0].p.length;
@@ -100,10 +104,15 @@ class XTVisualization {
         const targetNx = Math.min(this.plotWidth, fullNx);
         const targetNt = Math.min(this.plotHeight, fullNt);
         
-        // If already at or below target resolution, return original data
+        // If already at or below target resolution, create simplified copy
+        // with only the fields needed for rendering (t and p)
         if (fullNx <= targetNx && fullNt <= targetNt) {
             console.log(`No downsampling needed: ${fullNx}×${fullNt} fits in ${targetNx}×${targetNt}`);
-            return fullData;
+            // Create new array with only pressure data for rendering
+            return fullData.map(snapshot => ({
+                t: snapshot.t,
+                p: new Float64Array(snapshot.p)  // Copy pressure array
+            }));
         }
         
         console.log(`Downsampling from ${fullNx}×${fullNt} to ${targetNx}×${targetNt}`);

@@ -2984,15 +2984,14 @@ async function exportXTDataHDF5() {
         // Create HDF5 file
         const f = new window.h5wasm.File(filename, 'w');
         
-        // Extract dimensions
+        // Extract dimensions from full data
         const num_snapshots = xtResults.xtData.length;
         const nx = xtResults.x.length;
         
         // Deduplicate species by (gamma, MW)
         const speciesMap = new Map(); // key: "gamma_mw" -> {gamma, mw, names: [], gasIds: []}
-        const tolerance = 1e-6;
         
-        // Collect all unique (gamma, MW) pairs
+        // Collect all unique (gamma, MW) pairs from full data
         for (let i = 0; i < num_snapshots; i++) {
             const snapshot = xtResults.xtData[i];
             for (let j = 0; j < nx; j++) {
