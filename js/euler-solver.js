@@ -540,7 +540,33 @@ class EulerSolver {
             mw: new Float64Array(this.mw),      // Molecular weight
             gasId: Array.from(this.gasId)       // Gas identifier
         };
+        
+        // Include material fractions for mixed-cell method
+        if (this.interfaceMethod === 'mixed' && this.materialFractions) {
+            snapshot.materialFractions = new Float64Array(this.materialFractions);
+            snapshot.numMaterials = this.numMaterials;
+            snapshot.materialProperties = this.materialProperties.map(prop => ({...prop}));
+        }
+        
         this.xtData.push(snapshot);
+    }
+    /**
+     * Get results for export
+     */
+    getResults() {
+        return {
+            x: Array.from(this.x),
+            t: this.t,
+            rho: Array.from(this.rho),
+            u: Array.from(this.u),
+            p: Array.from(this.p),
+            T: Array.from(this.T),
+            xtData: this.xtData,
+            tracers: this.tracers,
+            timeSteps: this.timeSteps,
+            wallTime: this.wallTime || 0,
+            interfaceMethod: this.interfaceMethod
+        };
     }
     
     /**

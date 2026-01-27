@@ -2988,39 +2988,57 @@ async function exportXTDataHDF5() {
         const num_snapshots = xtResults.xtData.length;
         const nx = xtResults.x.length;
         
-        // Deduplicate species by (gamma, MW)
-        const speciesMap = new Map(); // key: "gamma_mw" -> {gamma, mw, names: [], gasIds: []}
+        // Check if we have mixed-cell data to determine species
+        const hasMixedCellData = xtResults.xtData[0].materialFractions !== undefined;
         
-        // Collect all unique (gamma, MW) pairs from full data
-        for (let i = 0; i < num_snapshots; i++) {
-            const snapshot = xtResults.xtData[i];
-            for (let j = 0; j < nx; j++) {
-                const gamma = snapshot.gamma[j];
-                const mw = snapshot.mw[j];
-                const gasId = snapshot.gasId[j];
-                
-                // Create key with tolerance
-                const key = `${gamma.toFixed(6)}_${mw.toFixed(4)}`;
-                
-                if (!speciesMap.has(key)) {
-                    speciesMap.set(key, {
-                        gamma: gamma,
-                        mw: mw,
-                        names: [gasId],
-                        gasIds: [gasId]
-                    });
-                } else {
-                    const species = speciesMap.get(key);
-                    if (!species.gasIds.includes(gasId)) {
-                        species.names.push(gasId);
-                        species.gasIds.push(gasId);
+        let speciesArray;
+        let n_species;
+        
+        if (hasMixedCellData) {
+            // For mixed-cell: species are the original materials, not computed mixtures
+            const firstSnapshot = xtResults.xtData[0];
+            speciesArray = firstSnapshot.materialProperties.map(prop => ({
+                gamma: prop.gamma,
+                mw: prop.mw,
+                names: [prop.gasId],
+                gasIds: [prop.gasId]
+            }));
+            n_species = speciesArray.length;
+        } else {
+            // For sharp interface: deduplicate species by (gamma, MW) from cell data
+            const speciesMap = new Map(); // key: "gamma_mw" -> {gamma, mw, names: [], gasIds: []}
+            
+            // Collect all unique (gamma, MW) pairs from full data
+            for (let i = 0; i < num_snapshots; i++) {
+                const snapshot = xtResults.xtData[i];
+                for (let j = 0; j < nx; j++) {
+                    const gamma = snapshot.gamma[j];
+                    const mw = snapshot.mw[j];
+                    const gasId = snapshot.gasId[j];
+                    
+                    // Create key with tolerance
+                    const key = `${gamma.toFixed(6)}_${mw.toFixed(4)}`;
+                    
+                    if (!speciesMap.has(key)) {
+                        speciesMap.set(key, {
+                            gamma: gamma,
+                            mw: mw,
+                            names: [gasId],
+                            gasIds: [gasId]
+                        });
+                    } else {
+                        const species = speciesMap.get(key);
+                        if (!species.gasIds.includes(gasId)) {
+                            species.names.push(gasId);
+                            species.gasIds.push(gasId);
+                        }
                     }
                 }
             }
+            
+            speciesArray = Array.from(speciesMap.values());
+            n_species = speciesArray.length;
         }
-        
-        const speciesArray = Array.from(speciesMap.values());
-        const n_species = speciesArray.length;
         
         // Create groups
         f.create_group('metadata');
@@ -3079,23 +3097,52 @@ async function exportXTDataHDF5() {
                 gamma2D[idx2D] = snapshot.gamma[j];
                 mw2D[idx2D] = snapshot.mw[j];
                 
-                // Find matching species for this cell
-                const cellGamma = snapshot.gamma[j];
-                const cellMw = snapshot.mw[j];
-                const key = `${cellGamma.toFixed(6)}_${cellMw.toFixed(4)}`;
-                
-                let speciesIdx = 0;
-                for (let k = 0; k < speciesArray.length; k++) {
-                    const speciesKey = `${speciesArray[k].gamma.toFixed(6)}_${speciesArray[k].mw.toFixed(4)}`;
-                    if (speciesKey === key) {
-                        speciesIdx = k;
-                        break;
+                if (hasMixedCellData) {
+                    // Mixed-cell method: use actual material fractions
+                    const numMaterials = snapshot.numMaterials;
+                    
+                    // Map each material to its corresponding species index
+                    for (let m = 0; m < numMaterials; m++) {
+                        const matProps = snapshot.materialProperties[m];
+                        const matKey = `${matProps.gamma.toFixed(6)}_${matProps.mw.toFixed(4)}`;
+                        
+                        // Find matching species
+                        let speciesIdx = 0;
+                        for (let k = 0; k < speciesArray.length; k++) {
+                            const speciesKey = `${speciesArray[k].gamma.toFixed(6)}_${speciesArray[k].mw.toFixed(4)}`;
+                            if (speciesKey === matKey) {
+                                speciesIdx = k;
+                                break;
+                            }
+                        }
+                        
+                        // Get material fraction for this cell and material
+                        const matFracIdx = j * numMaterials + m;
+                        const alpha = snapshot.materialFractions[matFracIdx];
+                        
+                        // Store in 3D array
+                        const idx3D = i * nx * n_species + j * n_species + speciesIdx;
+                        volumeFraction3D[idx3D] = alpha;
                     }
+                } else {
+                    // Sharp method: single species per cell
+                    const cellGamma = snapshot.gamma[j];
+                    const cellMw = snapshot.mw[j];
+                    const key = `${cellGamma.toFixed(6)}_${cellMw.toFixed(4)}`;
+                    
+                    let speciesIdx = 0;
+                    for (let k = 0; k < speciesArray.length; k++) {
+                        const speciesKey = `${speciesArray[k].gamma.toFixed(6)}_${speciesArray[k].mw.toFixed(4)}`;
+                        if (speciesKey === key) {
+                            speciesIdx = k;
+                            break;
+                        }
+                    }
+                    
+                    // Set volume fraction to 1.0 for this species
+                    const idx3D = i * nx * n_species + j * n_species + speciesIdx;
+                    volumeFraction3D[idx3D] = 1.0;
                 }
-                
-                // Set volume fraction to 1.0 for this species
-                const idx3D = i * nx * n_species + j * n_species + speciesIdx;
-                volumeFraction3D[idx3D] = 1.0;
             }
         }
         
