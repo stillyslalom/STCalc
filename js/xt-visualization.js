@@ -17,6 +17,12 @@ class XTVisualization {
         this.canvas.width = this.width;
         this.canvas.height = this.height;
         
+        // Create offscreen cache canvas for performance
+        this.cacheCanvas = document.createElement('canvas');
+        this.cacheCanvas.width = this.width;
+        this.cacheCanvas.height = this.height;
+        this.cacheCtx = this.cacheCanvas.getContext('2d');
+        
         // Plot area dimensions
         this.plotWidth = this.width - this.margin.left - this.margin.right;
         this.plotHeight = this.height - this.margin.top - this.margin.bottom;
@@ -170,13 +176,23 @@ class XTVisualization {
     
     /**
      * Render the complete visualization
+     * Draws to cache canvas, then copies to main canvas
      */
     render() {
-        // Clear canvas
-        this.ctx.fillStyle = '#ffffff';
-        this.ctx.fillRect(0, 0, this.width, this.height);
+        if (!this.xtData) {
+            // Clear main canvas if no data
+            this.ctx.fillStyle = '#ffffff';
+            this.ctx.fillRect(0, 0, this.width, this.height);
+            return;
+        }
         
-        if (!this.xtData) return;
+        // Clear cache canvas
+        this.cacheCtx.fillStyle = '#ffffff';
+        this.cacheCtx.fillRect(0, 0, this.width, this.height);
+        
+        // Store original context and switch to cache
+        const originalCtx = this.ctx;
+        this.ctx = this.cacheCtx;
         
         // Draw heatmap
         this.drawHeatmap();
@@ -189,6 +205,20 @@ class XTVisualization {
         
         // Draw colorbar
         this.drawColorbar();
+        
+        // Restore original context
+        this.ctx = originalCtx;
+        
+        // Copy cache to main canvas
+        this.drawFromCache();
+    }
+    
+    /**
+     * Fast rendering from cached canvas
+     * Simply copies the pre-rendered image without recalculation
+     */
+    drawFromCache() {
+        this.ctx.drawImage(this.cacheCanvas, 0, 0);
     }
     
     /**
@@ -390,6 +420,7 @@ class XTVisualization {
     
     /**
      * Draw tooltip on hover
+     * Optimized: Uses cached canvas instead of full re-render
      */
     drawTooltip() {
         if (this.mouseX < 0 || this.mouseY < 0) return;
@@ -397,12 +428,12 @@ class XTVisualization {
         // Check if mouse is in plot area
         if (this.mouseX < this.margin.left || this.mouseX > this.margin.left + this.plotWidth ||
             this.mouseY < this.margin.top || this.mouseY > this.margin.top + this.plotHeight) {
-            this.render();
+            this.drawFromCache();
             return;
         }
         
-        // Re-render to clear previous tooltip
-        this.render();
+        // Copy cached image to clear previous tooltip (fast!)
+        this.drawFromCache();
         
         // Get data coordinates (inverted y-axis)
         const x = this.xMin + (this.mouseX - this.margin.left) / this.plotWidth * (this.xMax - this.xMin);

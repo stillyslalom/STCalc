@@ -1267,12 +1267,218 @@ function loadCalculatorState() {
     }
 }
 
+// Toggle Custom Gas Library visibility
+function toggleCustomGasLibrary() {
+    var section = document.getElementById('custom_gas_management');
+    var button = document.getElementById('toggleCustomGasBtn');
+    
+    if (section.style.display === 'none' || section.style.display === '') {
+        section.style.display = 'block';
+        button.innerHTML = 'Manage Custom Gases ▲';
+    } else {
+        section.style.display = 'none';
+        button.innerHTML = 'Manage Custom Gases ▼';
+    }
+}
+
+// Show add gas form
+function showAddGasForm() {
+    var form = document.getElementById('add_gas_form');
+    form.style.display = 'block';
+    document.getElementById('new_gas_name').focus();
+}
+
+// Cancel add gas form
+function cancelAddGasForm() {
+    var form = document.getElementById('add_gas_form');
+    form.style.display = 'none';
+    document.getElementById('new_gas_name').value = '';
+    document.getElementById('new_gas_gamma').value = '';
+    document.getElementById('new_gas_mw').value = '';
+}
+
+// Add a new custom gas from the library
+function addNewCustomGas() {
+    var nameInput = document.getElementById('new_gas_name');
+    var gammaInput = document.getElementById('new_gas_gamma');
+    var mwInput = document.getElementById('new_gas_mw');
+    
+    var name = nameInput.value.trim();
+    var gamma = parseFloat(gammaInput.value);
+    var mw = parseFloat(mwInput.value);
+    
+    // Validate inputs
+    if (!name) {
+        alert('Please enter a gas name.');
+        nameInput.focus();
+        return;
+    }
+    
+    if (isNaN(gamma) || gamma <= 1.0) {
+        alert('Gamma must be a number greater than 1.0 (thermodynamically required for ideal gases).');
+        gammaInput.focus();
+        return;
+    }
+    
+    if (isNaN(mw) || mw <= 0) {
+        alert('Molecular weight must be a positive number.');
+        mwInput.focus();
+        return;
+    }
+    
+    // Check for duplicate name
+    var allGases = getAllGases();
+    for (var id in allGases) {
+        if (allGases[id].name.toLowerCase() === name.toLowerCase()) {
+            alert('A gas with this name already exists. Please use a different name.');
+            nameInput.focus();
+            return;
+        }
+    }
+    
+    // Create new custom gas
+    var gasId = 'custom_' + customGasCounter++;
+    customGases[gasId] = {
+        id: gasId,
+        name: name,
+        gamma: gamma,
+        mw: mw
+    };
+    
+    // Save to localStorage
+    saveCustomGases();
+    
+    // Update the list
+    updateCustomGasList();
+    
+    // Refresh all dropdowns to include the new gas
+    refreshAllGasDropdowns();
+    
+    // Clear and hide the form
+    cancelAddGasForm();
+    
+    alert('Custom gas "' + name + '" saved successfully!');
+}
+
+// Show edit form for a gas
+function editCustomGas(gasId) {
+    var gas = customGases[gasId];
+    if (!gas) return;
+    
+    var row = document.getElementById('gas_row_' + gasId);
+    if (!row) return;
+    
+    // Store original values in case of cancel
+    row.setAttribute('data-original-name', gas.name);
+    row.setAttribute('data-original-gamma', gas.gamma);
+    row.setAttribute('data-original-mw', gas.mw);
+    
+    // Replace row content with editable fields
+    row.innerHTML = 
+        '<td><input type="text" id="edit_name_' + gasId + '" value="' + gas.name + '" size="15"></td>' +
+        '<td><input type="text" id="edit_gamma_' + gasId + '" value="' + gas.gamma + '" size="8"></td>' +
+        '<td><input type="text" id="edit_mw_' + gasId + '" value="' + gas.mw + '" size="8"></td>' +
+        '<td>' +
+        '<button type="button" onclick="saveEditedCustomGas(\'' + gasId + '\')">Save</button> ' +
+        '<button type="button" onclick="cancelEditCustomGas(\'' + gasId + '\')">Cancel</button>' +
+        '</td>';
+}
+
+// Save edited gas properties
+function saveEditedCustomGas(gasId) {
+    var gas = customGases[gasId];
+    if (!gas) return;
+    
+    var nameInput = document.getElementById('edit_name_' + gasId);
+    var gammaInput = document.getElementById('edit_gamma_' + gasId);
+    var mwInput = document.getElementById('edit_mw_' + gasId);
+    
+    var name = nameInput.value.trim();
+    var gamma = parseFloat(gammaInput.value);
+    var mw = parseFloat(mwInput.value);
+    
+    // Validate inputs
+    if (!name) {
+        alert('Please enter a gas name.');
+        nameInput.focus();
+        return;
+    }
+    
+    if (isNaN(gamma) || gamma <= 1.0) {
+        alert('Gamma must be a number greater than 1.0 (thermodynamically required for ideal gases).');
+        gammaInput.focus();
+        return;
+    }
+    
+    if (isNaN(mw) || mw <= 0) {
+        alert('Molecular weight must be a positive number.');
+        mwInput.focus();
+        return;
+    }
+    
+    // Check for duplicate name (excluding current gas)
+    var allGases = getAllGases();
+    for (var id in allGases) {
+        if (id !== gasId && allGases[id].name.toLowerCase() === name.toLowerCase()) {
+            alert('A gas with this name already exists. Please use a different name.');
+            nameInput.focus();
+            return;
+        }
+    }
+    
+    // Check if gas is currently in use and properties have changed significantly
+    var propertiesChanged = Math.abs(gas.gamma - gamma) > 0.001 || Math.abs(gas.mw - mw) > 0.001;
+    if (propertiesChanged) {
+        var inUse = false;
+        var types = ['driven', 'driver'];
+        for (var t = 0; t < types.length; t++) {
+            var type = types[t];
+            for (var i = 0; i < mixtures[type].length; i++) {
+                var index = mixtures[type][i];
+                var select = document.getElementById(type + '_gas_' + index);
+                if (select && select.value === gasId) {
+                    inUse = true;
+                    break;
+                }
+            }
+            if (inUse) break;
+        }
+        
+        if (inUse) {
+            if (!confirm('Warning: This gas is currently selected in a mixture.\n\nChanging its properties will affect all calculations using it.\n\nDo you want to continue?')) {
+                return;
+            }
+        }
+    }
+    
+    // Update the gas properties
+    gas.name = name;
+    gas.gamma = gamma;
+    gas.mw = mw;
+    
+    // Save to localStorage
+    saveCustomGases();
+    
+    // Update the list display
+    updateCustomGasList();
+    
+    // Update all dropdowns to reflect the new name
+    refreshAllGasDropdowns();
+    
+    alert('Custom gas "' + name + '" updated successfully!');
+}
+
+// Cancel editing a gas
+function cancelEditCustomGas(gasId) {
+    // Simply refresh the list to restore original display
+    updateCustomGasList();
+}
+
 // Update the custom gases list display
 function updateCustomGasList() {
     var listDiv = document.getElementById('custom_gas_list');
-    var managementDiv = document.getElementById('custom_gas_management');
     
-    if (!listDiv || !managementDiv) return;
+    if (!listDiv) return;
     
     var gasCount = 0;
     for (var id in customGases) {
@@ -1280,27 +1486,26 @@ function updateCustomGasList() {
     }
     
     if (gasCount === 0) {
-        managementDiv.style.display = 'none';
+        listDiv.innerHTML = '<span style="color:#6c757d; font-style:italic;">No custom gases defined yet.</span>';
         return;
     }
-    
-    managementDiv.style.display = 'block';
     
     var html = '<table>';
     html += '<tr>';
     html += '<td>Gas Name</td>';
     html += '<td>Gamma (γ)</td>';
     html += '<td>MW (g/mol)</td>';
-    html += '<td>Action</td>';
+    html += '<td>Actions</td>';
     html += '</tr>';
     
     for (var id in customGases) {
         var gas = customGases[id];
-        html += '<tr>';
+        html += '<tr id="gas_row_' + id + '">';
         html += '<td>★ ' + gas.name + '</td>';
         html += '<td>' + gas.gamma.toFixed(4) + '</td>';
         html += '<td>' + gas.mw.toFixed(4) + '</td>';
         html += '<td>';
+        html += '<button type="button" onclick="editCustomGas(\'' + id + '\')">Edit</button> ';
         html += '<button type="button" onclick="deleteCustomGas(\'' + id + '\')">Delete</button>';
         html += '</td>';
         html += '</tr>';
@@ -1763,14 +1968,6 @@ function calculateMixtureProperties(type) {
 
 </script>
 
-<!-- Custom Gas Management Section -->
-<div id="custom_gas_management" class="custom-gas-library">
-  <b>Custom Gases Library</b> <span style="font-size:smaller; color:#6c757d;">(Saved in browser storage)</span><br>
-  <div id="custom_gas_list" style="margin-top:8px;">
-    <span style="color:#6c757d; font-style:italic;">No custom gases defined yet.</span>
-  </div>
-</div>
-
 <form name="Shock">
 <h1>Shock Tube Calculator</h1>
 
@@ -1845,6 +2042,29 @@ function calculateMixtureProperties(type) {
 <div class="form-group">
 <input name="convert" onclick="calcShock()" type="button" value="Calculate">
 <input name="reset" type="reset" value="Reset">
+<button type="button" id="toggleCustomGasBtn" onclick="toggleCustomGasLibrary()" style="background-color: #6c757d; border-color: #6c757d; margin-left: 8px;">Manage Custom Gases ▼</button>
+</div>
+
+<div id="custom_gas_management" class="custom-gas-library" style="display: none;">
+  <div style="margin-bottom: 15px;">
+    <button type="button" onclick="showAddGasForm()" style="background-color: #28a745; border-color: #28a745;">Add New Custom Gas</button>
+  </div>
+  
+  <!-- Add new gas form (initially hidden) -->
+  <div id="add_gas_form" style="display: none; margin-bottom: 15px; padding: 15px; background-color: #fff3cd; border: 1px solid #ffc107; border-radius: 3px;">
+    <b>Define New Gas:</b><br>
+    <div style="margin-top: 10px;">
+      Name: <input type="text" id="new_gas_name" size="15" placeholder="e.g., Methane">
+      Gamma (γ): <input type="text" id="new_gas_gamma" size="8" placeholder="e.g., 1.31">
+      MW (g/mol): <input type="text" id="new_gas_mw" size="8" placeholder="e.g., 16.04">
+      <button type="button" onclick="addNewCustomGas()">Save Gas</button>
+      <button type="button" onclick="cancelAddGasForm()">Cancel</button>
+    </div>
+  </div>
+  
+  <div id="custom_gas_list">
+    <span style="color:#6c757d; font-style:italic;">No custom gases defined yet.</span>
+  </div>
 </div>
 
 <hr>
