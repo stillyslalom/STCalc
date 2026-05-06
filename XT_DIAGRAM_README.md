@@ -9,11 +9,11 @@ The X-T Diagram Calculator solves the 1D compressible Euler equations using a fi
 ## Features
 
 ### Core Capabilities
-- **Multicomponent Gas Support**: Configure shock tubes with multiple gas slabs of different species
-- **HLLC Flux Scheme**: High-resolution Riemann solver for accurate shock capturing
-- **Lagrangian Tracers**: Track material interfaces through space and time
-- **Interactive Visualization**: Hover over the x-t diagram to see pressure values
-- **Data Export**: Download results as CSV or JSON for further analysis
+- Configure shock tubes with multiple gas slabs of different species
+- HLLC Riemann solver for accurate shock capturing
+- Track material interfaces through space and time with Lagrangian tracers
+- Hover over the x-t diagram to see pressure values at each point
+- Download results as CSV, JSON, or HDF5 for further analysis
 
 ### Gas Database
 - Pre-defined gases: Air, Nitrogen, Helium, Argon, Xenon, CO₂, SF₆, Neon, Acetone Vapor
@@ -23,11 +23,10 @@ The X-T Diagram Calculator solves the 1D compressible Euler equations using a fi
 ## Technical Details
 
 ### Numerical Method
-- **Spatial Discretization**: Finite volume method on uniform grid
-- **Flux Function**: HLLC Riemann solver with acoustic wave speed estimates
-- **Time Integration**: 2nd-order Runge-Kutta (RK2) method
-- **CFL Condition**: Adaptive time stepping with configurable CFL number (default 0.4)
-- **Boundary Conditions**: Reflective walls at domain boundaries
+- Finite volume method on uniform grid
+- HLLC Riemann solver with acoustic wave speed estimates
+- 2nd-order Runge-Kutta (RK2) adaptive time integration with configurable CFL number (default 0.4)
+- Reflective walls at domain boundaries
 
 ### Governing Equations
 The solver implements the 1D Euler equations in conservative form:
@@ -42,7 +41,7 @@ Where:
 - p = (γ-1)(E - ½ρu²) (equation of state for ideal gas)
 
 ### Gas Properties
-Each gas region is characterized by:
+Each gas region is an ideal gas characterized by:
 - **γ (gamma)**: Specific heat ratio
 - **MW**: Molecular weight (g/mol)
 - **R**: Gas constant = Rᵤ/MW where Rᵤ = 8314.51 J/(kmol·K)
@@ -69,9 +68,9 @@ Each gas region is characterized by:
    - Adjust slab lengths as needed
 
 3. **Set Simulation Parameters**
-   - **Grid Points**: 100-2000 (more = higher resolution, slower computation)
-   - **Simulation Time**: Duration in milliseconds
-   - **CFL Number**: Stability parameter (0.1-0.9, recommended: 0.4)
+   - 100-2000 grid points (more = higher resolution, slower computation)
+   - Simulation time in milliseconds
+   - CFL number: 0.1-0.9, recommended: 0.8
 
 4. **Run Simulation**
    - Click "Run Simulation"
@@ -79,10 +78,6 @@ Each gas region is characterized by:
    - View x-t diagram and statistics
 
 5. **Export Results**
-   - **Download Image (PNG)**: Export the visualization
-   - **Download X-T Data (CSV)**: Full pressure field at all time/space points
-   - **Download Tracer Data (CSV)**: Interface trajectory coordinates
-   - **Download Complete Data (JSON)**: All data including configuration
 
 ### Example Configuration
 
@@ -187,9 +182,9 @@ Requires:
 ## Performance Tips
 
 1. **Start Small**: Begin with 200-300 grid points for quick testing
-2. **Increase Resolution**: Use 500-1000 points for publication-quality results
+2. **Increase Resolution**: Use 1000-2000 points for better-resolved interfaces
 3. **Simulation Time**: Match physical phenomena (shocks reach walls ~10-20 ms typically)
-4. **CFL Number**: Lower values (0.3-0.4) are more stable but slower
+4. **CFL Number**: Lower values (0.3-0.4) are more stable but slower. The SSP integrator *can* remain stable at CFL numbers up to 2.0.
 
 ## References
 
