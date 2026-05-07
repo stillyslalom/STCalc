@@ -185,20 +185,38 @@ class EulerSolver {
      * Convert conservative to primitive variables
      */
     updatePrimitives() {
+        const minDensity = 1e-10;  // Minimum density threshold for numerical stability
+
         for (let i = 0; i < this.nx; i++) {
             const idx = i * 3;
             const rho = this.U[idx];
             const rhou = this.U[idx + 1];
             const E = this.U[idx + 2];
             const gamma = this.gamma[i];
-            
+
+            // Guard against zero or negative density
+            if (rho < minDensity) {
+                console.error(`Warning: Near-zero density detected at cell ${i}: ${rho}`);
+                this.rho[i] = minDensity;
+                this.u[i] = 0;
+                this.p[i] = minDensity;
+                this.T[i] = 1;
+                continue;
+            }
+
             this.rho[i] = rho;
             this.u[i] = rhou / rho;
-            
+
             // p = (gamma - 1) * (E - 0.5 * rho * u^2)
             const u = this.u[i];
             this.p[i] = (gamma - 1) * (E - 0.5 * rho * u * u);
-            
+
+            // Guard against negative pressure
+            if (this.p[i] < 0) {
+                console.error(`Warning: Negative pressure detected at cell ${i}: ${this.p[i]}`);
+                this.p[i] = minDensity;
+            }
+
             // T = p / (rho * R)
             const R = this.Ru / this.mw[i];
             this.T[i] = this.p[i] / (rho * R);
@@ -209,19 +227,21 @@ class EulerSolver {
      * Compute HLLC flux at cell interface
      */
     hllcFlux(UL, UR, gammaL, gammaR, fluxOut, idx) {
+        const minDensity = 1e-10;  // Minimum density threshold
+
         // Left state
-        const rhoL = UL[0];
+        const rhoL = Math.max(UL[0], minDensity);
         const uL = UL[1] / rhoL;
         const EL = UL[2];
-        const pL = (gammaL - 1) * (EL - 0.5 * rhoL * uL * uL);
+        const pL = Math.max((gammaL - 1) * (EL - 0.5 * rhoL * uL * uL), minDensity);
         const aL = Math.sqrt(gammaL * pL / rhoL);
         const HL = (EL + pL) / rhoL;
-        
+
         // Right state
-        const rhoR = UR[0];
+        const rhoR = Math.max(UR[0], minDensity);
         const uR = UR[1] / rhoR;
         const ER = UR[2];
-        const pR = (gammaR - 1) * (ER - 0.5 * rhoR * uR * uR);
+        const pR = Math.max((gammaR - 1) * (ER - 0.5 * rhoR * uR * uR), minDensity);
         const aR = Math.sqrt(gammaR * pR / rhoR);
         const HR = (ER + pR) / rhoR;
         
@@ -575,46 +595,49 @@ class EulerSolver {
     run(progressCallback) {
         const startTime = Date.now();
         let lastProgressUpdate = startTime;
-        
-        while (this.t < this.finalTime) {
-            // Delegate time stepping to the integrator
-            this.integrator.step(this);
-            
-            // Update progress every 100ms
-            const now = Date.now();
-            if (progressCallback && now - lastProgressUpdate > 100) {
-                progressCallback(this.t / this.finalTime);
-                lastProgressUpdate = now;
+
+        try {
+            while (this.t < this.finalTime) {
+                // Delegate time stepping to the integrator
+                this.integrator.step(this);
+
+                // Safety check for NaN or infinite values
+                if (!isFinite(this.dt) || this.dt <= 0) {
+                    throw new Error(`Invalid time step detected: dt = ${this.dt} at t = ${this.t}s`);
+                }
+
+                // Update progress every 100ms
+                const now = Date.now();
+                if (progressCallback && now - lastProgressUpdate > 100) {
+                    progressCallback(this.t / this.finalTime);
+                    lastProgressUpdate = now;
+                }
+
+                // Safety check to prevent infinite loops
+                if (this.timeSteps > 1000000) {
+                    throw new Error('Simulation exceeded maximum time steps (1,000,000). Check CFL condition and grid resolution.');
+                }
             }
+
+            // Final progress update
+            if (progressCallback) {
+                progressCallback(1.0);
+            }
+
+            const endTime = Date.now();
+            console.log(`Simulation completed in ${(endTime - startTime) / 1000} seconds`);
+            console.log(`Time steps: ${this.timeSteps}`);
+            console.log(`Final time: ${this.t} s`);
+            console.log(`X-T snapshots: ${this.xtData.length}`);
+
+            // Store wall time for performance tracking
+            this.wallTime = (endTime - startTime) / 1000;
+
+        } catch (error) {
+            const endTime = Date.now();
+            this.wallTime = (endTime - startTime) / 1000;
+            console.error('Simulation error:', error);
+            throw new Error(`Euler solver failed at t=${this.t.toFixed(6)}s after ${this.timeSteps} steps: ${error.message}`);
         }
-        
-        // Final progress update
-        if (progressCallback) {
-            progressCallback(1.0);
-        }
-        
-        const endTime = Date.now();
-        console.log(`Simulation completed in ${(endTime - startTime) / 1000} seconds`);
-        console.log(`Time steps: ${this.timeSteps}`);
-        console.log(`Final time: ${this.t} s`);
-        console.log(`X-T snapshots: ${this.xtData.length}`);
-    }
-    
-    /**
-     * Get results for export
-     */
-    getResults() {
-        return {
-            x: Array.from(this.x),
-            t: this.t,
-            rho: Array.from(this.rho),
-            u: Array.from(this.u),
-            p: Array.from(this.p),
-            T: Array.from(this.T),
-            xtData: this.xtData,
-            tracers: this.tracers,
-            timeSteps: this.timeSteps,
-            wallTime: this.wallTime || 0
-        };
     }
 }

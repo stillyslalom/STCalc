@@ -492,7 +492,7 @@ small a:hover {
 
 
 function calcShock() {
-
+    try {
         var p1,p2,p5,p2p1,p5p2;  //pressure and ratio
 
         var t1,t2,t5,t2t1,t5t2;  //temperature and ratio
@@ -519,9 +519,31 @@ function calcShock() {
 
         areafactor = parseFloat(document.Shock.areafact.value);
 
-        //decide driven gas;
+        // Validate input parameters for physical constraints
+        if (isNaN(m) || m <= 0) {
+            alert('Error: Mach number must be a positive number greater than 0');
+            return;
+        }
 
-        if (document.Shock.drivengas.value == "custom"){
+        if (isNaN(p1) || p1 <= 0) {
+            alert('Error: Initial pressure must be a positive number greater than 0');
+            return;
+        }
+
+        if (isNaN(t1) || t1 <= 0) {
+            alert('Error: Initial temperature must be a positive number greater than 0 K');
+            return;
+        }
+
+        if (isNaN(areafactor) || areafactor <= 0) {
+            alert('Error: Area factor must be a positive number greater than 0');
+            return;
+        }
+
+        // Get driven gas properties
+        var drivenGasId = document.Shock.drivengas.value;
+
+        if (drivenGasId === 'custom') {
             // Calculate properties for custom mixture
             var drivenProps = calculateMixtureProperties('driven');
             if (drivenProps === null) {
@@ -529,90 +551,21 @@ function calcShock() {
             }
             g = drivenProps.gamma;
             mw = drivenProps.mw;
+        } else {
+            // Use gas database lookup
+            var drivenGas = getGasById(drivenGasId);
+            if (!drivenGas) {
+                alert('Error: Invalid driven gas selection');
+                return;
+            }
+            g = drivenGas.gamma;
+            mw = drivenGas.mw;
         }
-        else if (document.Shock.drivengas.value == "1"){
 
-              g=parseFloat(1.4020);
+        // Get driver gas properties
+        var driverGasId = document.Shock.drivergas.value;
 
-              mw=parseFloat(28.9660);
-
-            }
-
-        else if (document.Shock.drivengas.value == "2"){
-
-             g=parseFloat(1.6700);
-
-            mw=parseFloat(39.948000);
-
-            }
-
-        else if (document.Shock.drivengas.value == "3"){
-
-             g=parseFloat(1.29700);
-
-            mw=parseFloat(44.01000);
-
-            }
-
-        else if (document.Shock.drivengas.value == "4"){
-
-             g=parseFloat(1.66700);
-
-            mw=parseFloat(4.002602000);
-
-            }
-
-        else if (document.Shock.drivengas.value == "5"){
-
-             g=parseFloat(1.66700);
-
-            mw=parseFloat(20.179700);
-
-            }
-
-        else if (document.Shock.drivengas.value == "6"){
-
-             g=parseFloat(1.40100);
-
-            mw=parseFloat(28.0134000);
-
-            }
-
-        else if (document.Shock.drivengas.value == "7"){
-
-             g=parseFloat(1.66700);
-
-            mw=parseFloat(131.29000);
-
-            }
-
-        else if (document.Shock.drivengas.value == "8"){
-
-             g=parseFloat(1.09200);
-
-            mw=parseFloat(146.06000);
-
-            }
-
-		else if (document.Shock.drivengas.value == "9"){
-
-             g=parseFloat(1.668);
-
-            mw=parseFloat(21.98);
-
-            }
-
-        else if (document.Shock.drivengas.value == "10"){
-
-             g=parseFloat(1.14000);
-
-            mw=parseFloat(58.08000);
-
-            }
-
-        // decide driver gas
-
-        if (document.Shock.drivergas.value == "custom"){
+        if (driverGasId === 'custom') {
             // Calculate properties for custom mixture
             var driverProps = calculateMixtureProperties('driver');
             if (driverProps === null) {
@@ -620,80 +573,24 @@ function calcShock() {
             }
             g4 = driverProps.gamma;
             mw4 = driverProps.mw;
+        } else {
+            // Use gas database lookup
+            var driverGas = getGasById(driverGasId);
+            if (!driverGas) {
+                alert('Error: Invalid driver gas selection');
+                return;
+            }
+            g4 = driverGas.gamma;
+            mw4 = driverGas.mw;
         }
-        else if (document.Shock.drivergas.value == "1"){
-
-              g4=parseFloat(1.4020);
-
-              mw4=parseFloat(28.9660);
-
-            }
-
-        else if (document.Shock.drivergas.value == "2"){
-
-             g4=parseFloat(1.6700);
-
-            mw4=parseFloat(39.948000);
-
-            }
-
-        else if (document.Shock.drivergas.value == "3"){
-
-             g4=parseFloat(1.29700);
-
-            mw4=parseFloat(44.01000);
-
-            }
-
-        else if (document.Shock.drivergas.value == "4"){
-
-             g4=parseFloat(1.66700);
-
-            mw4=parseFloat(4.002602000);
-
-            }
-
-        else if (document.Shock.drivergas.value == "5"){
-
-             g4=parseFloat(1.66700);
-
-            mw4=parseFloat(20.179700);
-
-            }
-
-        else if (document.Shock.drivergas.value == "6"){
-
-             g4=parseFloat(1.40100);
-
-            mw4=parseFloat(28.0134000);
-
-            }
-
-        else if (document.Shock.drivergas.value == "7"){
-
-             g4=parseFloat(1.66700);
-
-            mw4=parseFloat(131.29000);
-
-            }
-
-        else if (document.Shock.drivergas.value == "8"){
-
-             g4=parseFloat(1.09200);
-
-            mw4=parseFloat(146.06000);
-
-            }
-
-        else if (document.Shock.drivergas.value == "10"){
-
-             g4=parseFloat(1.14000);
-
-            mw4=parseFloat(58.08000);
-
-            }
 
       	t4 = parseFloat(document.Shock.tid.value);
+
+        // Validate driver temperature
+        if (isNaN(t4) || t4 <= 0) {
+            alert('Error: Driver temperature must be a positive number greater than 0 K');
+            return;
+        }
 
 	//document.write("t4 " + t4 + "  ");    
 
@@ -858,12 +755,17 @@ function calcShock() {
         // Save calculator state to localStorage
         saveCalculatorState();
 
+    } catch (error) {
+        console.error('Error in shock calculation:', error);
+        alert('An error occurred during shock tube calculation: ' + error.message +
+              '\n\nPlease check your input values and try again.');
+    }
 }
 
 
 
 function calcTime() {
-
+    try {
         var xwave,xtrig,twave,wactual,mactual,xint;
 
         var tdelayshock,tdelaymembrane,u2;
@@ -894,12 +796,17 @@ function calcTime() {
 
         document.Timing.tdelaymembrane.value = tdelaymembrane;
 
+    } catch (error) {
+        console.error('Error in timing calculation:', error);
+        alert('An error occurred during timing calculation: ' + error.message +
+              '\n\nPlease ensure the shock calculation has been run first.');
+    }
 }
 
 
 
 function calcBoost() {
-
+    try {
         var drivervol,boostvol,prupture,percless,percmore,ru;
 
         var r,mw4,g4,psig,ppa,ppreboost,ppostboost,pboosttank;
@@ -922,71 +829,22 @@ function calcBoost() {
 
      
 
-        // decide driver gas
+        // Get driver gas properties (boost calculations don't support custom mixtures)
+        var driverGasId = document.Shock.drivergas.value;
 
-        if (document.Shock.drivergas.value == "1"){
+        if (driverGasId === 'custom') {
+            alert('Error: Boost tank calculations do not support custom gas mixtures. Please select a standard gas.');
+            return;
+        }
 
-              g4=parseFloat(1.4020);
+        var boostDriverGas = getGasById(driverGasId);
+        if (!boostDriverGas) {
+            alert('Error: Invalid driver gas selection for boost calculation');
+            return;
+        }
 
-              mw4=parseFloat(28.9660);
-
-            }
-
-        if (document.Shock.drivergas.value == "2"){
-
-             g4=parseFloat(1.6700);
-
-            mw4=parseFloat(39.948000);
-
-            }
-
-        if (document.Shock.drivergas.value == "3"){
-
-             g4=parseFloat(1.29700);
-
-            mw4=parseFloat(44.01000);
-
-            }
-
-        if (document.Shock.drivergas.value == "4"){
-
-             g4=parseFloat(1.66700);
-
-            mw4=parseFloat(4.002602000);
-
-            }
-
-        if (document.Shock.drivergas.value == "5"){
-
-             g4=parseFloat(1.66700);
-
-            mw4=parseFloat(20.179700);
-
-            }
-
-        if (document.Shock.drivergas.value == "6"){
-
-             g4=parseFloat(1.40100);
-
-            mw4=parseFloat(28.0134000);
-
-            }
-
-        if (document.Shock.drivergas.value == "7"){
-
-             g4=parseFloat(1.66700);
-
-            mw4=parseFloat(131.29000);
-
-            }
-
-        if (document.Shock.drivergas.value == "8"){
-
-             g4=parseFloat(1.09200);
-
-            mw4=parseFloat(146.06000);
-
-            }
+        g4 = boostDriverGas.gamma;
+        mw4 = boostDriverGas.mw;
 
         ru=parseFloat(8314.510);
 
@@ -1015,10 +873,11 @@ function calcBoost() {
 
        document.Boosttank.pboosttank.value = pboosttank*psig/ppa
 
-       
-
-       
-
+    } catch (error) {
+        console.error('Error in boost tank calculation:', error);
+        alert('An error occurred during boost tank calculation: ' + error.message +
+              '\n\nPlease check your input values and try again.');
+    }
 }
 
 // Gas database with properties
@@ -1721,9 +1580,9 @@ function showDefineGasForm(type, index) {
     var defineDiv = document.getElementById(type + '_define_' + index);
     
     defineDiv.innerHTML = '<b>Define New Gas:</b><br>' +
-        'Name: <input type="text" id="' + type + '_newgas_name_' + index + '" size="15" placeholder="e.g., Methane"> ' +
-        'Gamma (γ): <input type="text" id="' + type + '_newgas_gamma_' + index + '" size="8" placeholder="e.g., 1.31"> ' +
-        'MW (g/mol): <input type="text" id="' + type + '_newgas_mw_' + index + '" size="8" placeholder="e.g., 16.04"> ' +
+        'Name: <input type="text" id="' + type + '_newgas_name_' + index + '" placeholder="e.g., Methane" style="width:140px;"> ' +
+        'Gamma (γ): <input type="text" id="' + type + '_newgas_gamma_' + index + '" placeholder="e.g., 1.31" style="width:80px;"> ' +
+        'MW (g/mol): <input type="text" id="' + type + '_newgas_mw_' + index + '" placeholder="e.g., 16.04" style="width:80px;"> ' +
         '<button type="button" onclick="saveCustomGas(\'' + type + '\', ' + index + ')">Save Gas</button> ' +
         '<button type="button" onclick="cancelDefineGas(\'' + type + '\', ' + index + ')">Cancel</button>';
     
@@ -2054,9 +1913,9 @@ function calculateMixtureProperties(type) {
   <div id="add_gas_form" style="display: none; margin-bottom: 15px; padding: 15px; background-color: #fff3cd; border: 1px solid #ffc107; border-radius: 3px;">
     <b>Define New Gas:</b><br>
     <div style="margin-top: 10px;">
-      Name: <input type="text" id="new_gas_name" size="15" placeholder="e.g., Methane">
-      Gamma (γ): <input type="text" id="new_gas_gamma" size="8" placeholder="e.g., 1.31">
-      MW (g/mol): <input type="text" id="new_gas_mw" size="8" placeholder="e.g., 16.04">
+      Name: <input type="text" id="new_gas_name" placeholder="e.g., Methane" style="width:140px;">
+      Gamma (γ): <input type="text" id="new_gas_gamma" placeholder="e.g., 1.31" style="width:80px;">
+      MW (g/mol): <input type="text" id="new_gas_mw" placeholder="e.g., 16.04" style="width:80px;">
       <button type="button" onclick="addNewCustomGas()">Save Gas</button>
       <button type="button" onclick="cancelAddGasForm()">Cancel</button>
     </div>
@@ -2471,7 +2330,8 @@ window.h5wasmReady = h5wasm.ready.then(() => {
 });
 </script>
 
-<!-- Load X-T Diagram JavaScript -->
+<!-- Load JavaScript modules -->
+<script src="js/shock-import.js"></script>
 <script src="js/xt-mixture.js"></script>
 <script src="js/time-integrators.js"></script>
 <script src="js/euler-solver.js"></script>

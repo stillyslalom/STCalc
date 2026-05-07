@@ -51,9 +51,10 @@ function getAllGases() {
 }
 
 /**
- * Calculate mixture properties from components
+ * Calculate mixture properties from components array
+ * Used by X-T diagram and other modules that work with component arrays
  */
-function calculateMixtureProperties(components) {
+function calculateMixturePropertiesFromComponents(components) {
     if (!components || components.length === 0) {
         return null;
     }
@@ -118,7 +119,7 @@ function importFromCalculator() {
         // Process driven gas
         let drivenGas = null;
         if (state.drivengas === 'custom' && state.drivenMixture) {
-            const props = calculateMixtureProperties(state.drivenMixture);
+            const props = calculateMixturePropertiesFromComponents(state.drivenMixture);
             if (props) {
                 drivenGas = {
                     gasId: 'custom_driven',
@@ -136,11 +137,11 @@ function importFromCalculator() {
                 mw: gas.mw
             };
         }
-        
+
         // Process driver gas
         let driverGas = null;
         if (state.drivergas === 'custom' && state.driverMixture) {
-            const props = calculateMixtureProperties(state.driverMixture);
+            const props = calculateMixturePropertiesFromComponents(state.driverMixture);
             if (props) {
                 driverGas = {
                     gasId: 'custom_driver',
@@ -218,4 +219,40 @@ function populateGasDropdown(selectElement) {
 function getGasById(gasId) {
     const allGases = getAllGases();
     return allGases[gasId] || null;
+}
+
+/**
+ * Get gas properties for calculations - handles both regular gases and custom mixtures
+ * Returns {gamma, mw, name} or null if not found
+ *
+ * @param {string} gasId - Gas ID (e.g., "1", "custom_abc")
+ * @param {string} context - Context identifier (e.g., 'driven', 'driver') for mixture lookup
+ * @param {Object} mixtures - Optional mixtures object for custom gas context
+ * @returns {Object|null} Gas properties {gamma, mw, name} or null
+ */
+function getGasProperties(gasId, context, mixtures) {
+    // Handle custom mixtures
+    if (gasId === 'custom' && mixtures && mixtures[context]) {
+        const props = calculateMixturePropertiesFromComponents(mixtures[context]);
+        if (props) {
+            return {
+                gamma: props.gamma,
+                mw: props.mw,
+                name: 'Custom Mixture'
+            };
+        }
+        return null;
+    }
+
+    // Handle regular gases and custom defined gases
+    const gas = getGasById(gasId);
+    if (gas) {
+        return {
+            gamma: gas.gamma,
+            mw: gas.mw,
+            name: gas.name
+        };
+    }
+
+    return null;
 }

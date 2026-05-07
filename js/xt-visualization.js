@@ -44,23 +44,37 @@ class XTVisualization {
         // Interaction
         this.mouseX = -1;
         this.mouseY = -1;
-        
+        this.tooltipThrottleTimer = null;
+        this.tooltipThrottleDelay = 16; // ~60fps throttle
+
         // Setup event listeners
         this.setupEventListeners();
     }
-    
+
     /**
-     * Setup mouse interaction
+     * Setup mouse interaction with throttled tooltip rendering
      */
     setupEventListeners() {
         this.canvas.addEventListener('mousemove', (e) => {
             const rect = this.canvas.getBoundingClientRect();
             this.mouseX = e.clientX - rect.left;
             this.mouseY = e.clientY - rect.top;
-            this.drawTooltip();
+
+            // Throttle tooltip updates to avoid excessive redraws
+            if (!this.tooltipThrottleTimer) {
+                this.tooltipThrottleTimer = setTimeout(() => {
+                    this.drawTooltip();
+                    this.tooltipThrottleTimer = null;
+                }, this.tooltipThrottleDelay);
+            }
         });
-        
+
         this.canvas.addEventListener('mouseleave', () => {
+            // Clear any pending tooltip timer
+            if (this.tooltipThrottleTimer) {
+                clearTimeout(this.tooltipThrottleTimer);
+                this.tooltipThrottleTimer = null;
+            }
             this.mouseX = -1;
             this.mouseY = -1;
             this.render();

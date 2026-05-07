@@ -113,9 +113,9 @@ function showXTDefineGasForm(slabId, compId) {
     
     defineDiv.innerHTML = '<div style="background-color:#fff3cd;border:1px solid #ffc107;border-radius:3px;padding:10px;margin-top:5px;">' +
         '<b>Define New Gas:</b><br>' +
-        'Name: <input type="text" id="xt_newgas_name_' + slabId + '_' + compId + '" size="15" placeholder="e.g., Methane" style="margin:5px 5px 5px 0;"> ' +
-        'Gamma (γ): <input type="text" id="xt_newgas_gamma_' + slabId + '_' + compId + '" size="8" placeholder="e.g., 1.31" style="margin:5px 5px 5px 0;"> ' +
-        'MW (g/mol): <input type="text" id="xt_newgas_mw_' + slabId + '_' + compId + '" size="8" placeholder="e.g., 16.04" style="margin:5px 5px 5px 0;"> ' +
+        'Name: <input type="text" id="xt_newgas_name_' + slabId + '_' + compId + '" placeholder="e.g., Methane" style="width:140px;margin:5px 5px 5px 0;"> ' +
+        'Gamma (γ): <input type="text" id="xt_newgas_gamma_' + slabId + '_' + compId + '" placeholder="e.g., 1.31" style="width:80px;margin:5px 5px 5px 0;"> ' +
+        'MW (g/mol): <input type="text" id="xt_newgas_mw_' + slabId + '_' + compId + '" placeholder="e.g., 16.04" style="width:80px;margin:5px 5px 5px 0;"> ' +
         '<button type="button" onclick="saveXTCustomGas(' + slabId + ', ' + compId + ')" style="margin:5px 5px 5px 0;">Save Gas</button> ' +
         '<button type="button" onclick="cancelXTDefineGas(' + slabId + ', ' + compId + ')" style="margin:5px 0;">Cancel</button>' +
         '</div>';
