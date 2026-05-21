@@ -903,6 +903,9 @@ var mixtures = {
 var customGases = {};
 var customGasCounter = 0;
 
+// Flag to prevent saving state during initial load
+var isLoadingState = false;
+
 // Load custom gases from localStorage on page load
 function loadCustomGases() {
     try {
@@ -934,7 +937,7 @@ function saveCustomGases() {
         }
         localStorage.setItem('wistl_custom_gases', JSON.stringify(gasArray));
     } catch (e) {
-        alert('Error saving custom gases. Storage quota may be exceeded.');
+        alert('Error saving custom gases. localStorage may be corrupted or disabled.\n\nYour custom gas will work in this session but may not persist after refresh.\n\nTo fix: Clear browser data (Settings > Privacy & Security > Cookies and Site Data > Clear Data)');
         console.error('Error saving custom gases:', e);
     }
 }
@@ -992,12 +995,40 @@ function clearOutputFields() {
     document.Boosttank.pboosttank.value = '';
 }
 
+// Check if localStorage is working
+function checkLocalStorage() {
+    try {
+        var testKey = '__localStorage_test__';
+        localStorage.setItem(testKey, 'test');
+        localStorage.removeItem(testKey);
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+// Show localStorage error banner
+function showLocalStorageWarning() {
+    var banner = document.createElement('div');
+    banner.style.cssText = 'background-color:#fff3cd;border:2px solid #ffc107;padding:15px;margin:10px;border-radius:5px;text-align:center;';
+    banner.innerHTML = '<strong>⚠️ Storage Warning:</strong> Browser storage is corrupted or disabled. ' +
+        'The calculator will work, but settings and custom gases won\'t be saved after refresh. ' +
+        '<a href="LOCALSTORAGE_CORRUPTION_FIX.md" target="_blank" style="color:#0066cc;text-decoration:underline;">How to fix</a>';
+    var container = document.getElementById('container') || document.body;
+    container.insertBefore(banner, container.firstChild);
+}
+
 // Initialize custom gases on page load
 window.onload = function() {
     loadCustomGases();
     updateCustomGasList();
     loadCalculatorState();
     clearOutputFields();
+
+    // Check if localStorage is working and show warning if not
+    if (!checkLocalStorage()) {
+        showLocalStorageWarning();
+    }
 
     // Add reset event listener to clear output fields
     document.Shock.addEventListener('reset', function() {
@@ -1056,7 +1087,12 @@ function saveCalculatorState() {
         
         localStorage.setItem('wistl_calculator_state', JSON.stringify(state));
     } catch (e) {
-        console.error('Error saving calculator state:', e);
+        // Silently handle localStorage errors (might be corrupted, disabled, or full)
+        // Don't spam the console on every keystroke if localStorage is broken
+        if (!window._localStorageWarningShown) {
+            console.warn('Cannot save calculator state - localStorage may be disabled or corrupted.');
+            window._localStorageWarningShown = true;
+        }
     }
 }
 
@@ -1065,7 +1101,10 @@ function loadCalculatorState() {
     try {
         var stored = localStorage.getItem('wistl_calculator_state');
         if (!stored) return;
-        
+
+        // Set flag to prevent saving during restoration
+        isLoadingState = true;
+
         var state = JSON.parse(stored);
         
         // Restore basic inputs
@@ -1128,7 +1167,17 @@ function loadCalculatorState() {
             }
         }
     } catch (e) {
-        console.error('Error loading calculator state:', e);
+        console.warn('Could not load calculator state (localStorage may be corrupted). Starting with default values.');
+        // Try to clear corrupted data, but don't fail if this also errors
+        try {
+            localStorage.removeItem('wistl_calculator_state');
+        } catch (clearError) {
+            // If localStorage is completely corrupted at browser level, suggest manual fix
+            console.warn('To fix localStorage corruption: Open Settings > Privacy & Security > Cookies and Site Data > Clear Data, or try Private Browsing mode.');
+        }
+    } finally {
+        // Always clear the flag, even if there was an error
+        isLoadingState = false;
     }
 }
 
@@ -1449,7 +1498,7 @@ function deleteCustomGas(gasId) {
 function toggleMixtureInputs(type) {
     var selectElement = document.Shock[type + 'gas'];
     var divElement = document.getElementById(type + '_mixture_div');
-    
+
     if (selectElement.value === 'custom') {
         divElement.style.display = 'block';
         // Initialize with one gas input if empty
@@ -1458,6 +1507,11 @@ function toggleMixtureInputs(type) {
         }
     } else {
         divElement.style.display = 'none';
+    }
+
+    // Save state whenever gas selection changes (unless we're loading state)
+    if (!isLoadingState) {
+        saveCalculatorState();
     }
 }
 
@@ -1568,7 +1622,7 @@ function addGasToMixture(type) {
 function handleGasSelection(type, index) {
     var select = document.getElementById(type + '_gas_' + index);
     var defineDiv = document.getElementById(type + '_define_' + index);
-    
+
     if (select.value === 'define_new') {
         // Show the custom gas definition form
         showDefineGasForm(type, index);
@@ -1578,6 +1632,10 @@ function handleGasSelection(type, index) {
             defineDiv.style.display = 'none';
         }
         updateMixtureTotal(type);
+        // Save state when gas selection changes (unless we're loading state)
+        if (!isLoadingState) {
+            saveCalculatorState();
+        }
     }
 }
 
@@ -1723,6 +1781,10 @@ function removeGasFromMixture(type, index) {
             mixtures[type].splice(idx, 1);
         }
         updateMixtureTotal(type);
+        // Save state when component is removed (unless we're loading state)
+        if (!isLoadingState) {
+            saveCalculatorState();
+        }
     }
 }
 
@@ -1730,7 +1792,7 @@ function removeGasFromMixture(type, index) {
 function updateMixtureTotal(type) {
     var total = 0.0;
     var valid = true;
-    
+
     for (var i = 0; i < mixtures[type].length; i++) {
         var index = mixtures[type][i];
         var input = document.getElementById(type + '_frac_' + index);
@@ -1741,16 +1803,21 @@ function updateMixtureTotal(type) {
             }
         }
     }
-    
+
     var totalSpan = document.getElementById(type + '_total');
     var displayTotal = Math.round(total * 100 * 100) / 100; // Round to 2 decimal places
-    
+
     if (Math.abs(total - 1.0) < 0.001) {
         totalSpan.innerHTML = '<span style="color:#28a745;">Total: ' + displayTotal + '% ✓</span>';
     } else if (total > 0) {
         totalSpan.innerHTML = '<span style="color:#dc3545;">Total: ' + displayTotal + '% (must equal 100%)</span>';
     } else {
         totalSpan.innerHTML = '<span style="color:#6c757d;">Total: 0%</span>';
+    }
+
+    // Save state when fractions change (unless we're loading state)
+    if (!isLoadingState) {
+        saveCalculatorState();
     }
 }
 
@@ -1908,6 +1975,10 @@ function calculateMixtureProperties(type) {
 <input name="convert" onclick="calcShock()" type="button" value="Calculate">
 <input name="reset" type="reset" value="Reset">
 <button type="button" id="toggleCustomGasBtn" onclick="toggleCustomGasLibrary()" style="background-color: #6c757d; border-color: #6c757d; margin-left: 8px;">Manage Custom Gases ▼</button>
+<label style="display: inline-flex; align-items: center; margin-left: 15px; cursor: pointer; user-select: none;">
+  <input type="checkbox" id="enableInterfaceCalc" onchange="toggleInterfaceSection()" style="margin-right: 6px; width: 16px; height: 16px;">
+  <span style="font-weight: 600;">Calculate RMI Interface</span>
+</label>
 </div>
 
 <div id="custom_gas_management" class="custom-gas-library" style="display: none;">
@@ -1998,6 +2069,156 @@ Approximate driver pressure (<input maxlength="5" name="areafact" size="5" value
 <input maxlength="9" name="pfourpsig" size="9" value="73.54339557717464"> psig<br>
 <a href="#" onclick="showEquationsModal(); return false;">View Equations</a>
 </small>
+
+<hr>
+
+<div id="interfaceSection" style="display: none;">
+
+<h2>Shocked-Interface Conditions (RMI)</h2>
+
+<div style="background-color: #f0f8ff; border: 1px solid #bee5eb; border-radius: 3px; padding: 10px; margin-bottom: 15px; font-size: 14px;">
+  Calculate post-shock interface conditions for Richtmyer-Meshkov instability (RMI) experiments.
+  Solves the exact Riemann problem at a gas interface after shock passage.
+</div>
+
+  <h3>Interface Configuration</h3>
+
+  <div class="form-group">
+    <label for="interfaceHeavyGas">
+      Heavy Gas (below interface):
+      <span title="The heavier gas below the interface that remains unshocked initially"
+            style="cursor:help; color:#0066cc; font-weight:normal;">ⓘ</span>
+    </label>
+    <select id="interfaceHeavyGas" onchange="updateInterfaceHeavyGas()" style="width: 200px;">
+      <option value="">-- Select Gas --</option>
+    </select>
+  </div>
+
+  <div class="form-group">
+    <label for="interfaceHeavyTemp">Heavy Gas Temperature:</label>
+    <input type="number" id="interfaceHeavyTemp" value="300" min="1" step="1" style="width: 100px;">
+    <span style="font-size: 12px; color: #6c757d; margin-left: 8px;">K (pressure equals driven gas)</span>
+  </div>
+
+  <div id="heavyGasCustomMixture" style="display: none; margin-left: 20px; margin-bottom: 15px; padding: 10px; background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 3px;">
+    <h4 style="margin-top: 0;">Custom Heavy Gas Mixture</h4>
+    <div id="heavyGasMixtureList"></div>
+    <button type="button" onclick="addHeavyGasMixtureRow()" style="font-size: 12px; padding: 5px 10px;">Add Component</button>
+  </div>
+
+  <h3 style="margin-top: 25px;">Initial Perturbation (for RMI growth prediction)</h3>
+
+  <div class="form-group">
+    <label for="perturbWavelength">Wavelength (λ):</label>
+    <input type="number" id="perturbWavelength" value="10" min="0.1" step="0.1" style="width: 100px;">
+    <span style="font-size: 12px; color: #6c757d; margin-left: 8px;">mm</span>
+  </div>
+
+  <div class="form-group">
+    <label for="perturbAmplitude">Initial Amplitude (a₀):</label>
+    <input type="number" id="perturbAmplitude" value="0.5" min="0.01" step="0.01" style="width: 100px;">
+    <span style="font-size: 12px; color: #6c757d; margin-left: 8px;">mm</span>
+  </div>
+
+  <div class="form-group">
+    <label for="rmiDownstreamDist">
+      Downstream Distance:
+      <span title="Distance downstream from interface for camera/diagnostic placement"
+            style="cursor:help; color:#0066cc; font-weight:normal;">ⓘ</span>
+    </label>
+    <input type="number" id="rmiDownstreamDist" value="200" min="10" step="10" style="width: 100px;">
+    <span style="font-size: 12px; color: #6c757d; margin-left: 8px;">mm from initial interface position</span>
+  </div>
+
+  <button type="button" onclick="calculateInterface()" style="background-color: #17a2b8; border-color: #17a2b8; margin-top: 10px;">
+    Calculate Interface Conditions
+  </button>
+
+  <div id="interfaceResults" style="display: none; margin-top: 20px;">
+    <h3>Interface Results</h3>
+
+    <table style="margin-bottom: 15px;">
+      <tr style="background-color: #e9ecef;">
+        <td colspan="4" style="font-weight: 600; padding: 8px;">Post-Shock Interface Conditions</td>
+      </tr>
+      <tr>
+        <td style="font-weight: 600;">Interface Velocity</td>
+        <td><input type="text" id="interfaceVelocity" readonly size="12"></td>
+        <td>m/s</td>
+      </tr>
+      <tr>
+        <td style="font-weight: 600;">Interface Pressure</td>
+        <td><input type="text" id="interfacePressure" readonly size="12"></td>
+        <td>MPa</td>
+      </tr>
+      <tr>
+        <td style="font-weight: 600;">Atwood Number (A)</td>
+        <td><input type="text" id="atwoodNumber" readonly size="12"></td>
+        <td></td>
+      </tr>
+      <tr>
+        <td style="font-weight: 600;">Wave Configuration</td>
+        <td colspan="2"><input type="text" id="waveConfig" readonly size="30"></td>
+      </tr>
+    </table>
+
+    <table>
+      <tr>
+        <td></td>
+        <td style="font-weight: 600;">Light Gas (shocked)</td>
+        <td style="font-weight: 600;">Heavy Gas (post-shock)</td>
+        <td></td>
+      </tr>
+      <tr>
+        <td>Pressure</td>
+        <td><input type="text" id="lightGasPressure" readonly size="12"></td>
+        <td><input type="text" id="heavyGasPressure" readonly size="12"></td>
+        <td>MPa</td>
+      </tr>
+      <tr>
+        <td>Temperature</td>
+        <td><input type="text" id="lightGasTemp" readonly size="12"></td>
+        <td><input type="text" id="heavyGasTemp" readonly size="12"></td>
+        <td>K</td>
+      </tr>
+      <tr>
+        <td>Density</td>
+        <td><input type="text" id="lightGasDensity" readonly size="12"></td>
+        <td><input type="text" id="heavyGasDensity" readonly size="12"></td>
+        <td>kg/m³</td>
+      </tr>
+      <tr>
+        <td>Sound Speed</td>
+        <td><input type="text" id="lightGasSound" readonly size="12"></td>
+        <td><input type="text" id="heavyGasSound" readonly size="12"></td>
+        <td>m/s</td>
+      </tr>
+    </table>
+
+    <h3 style="margin-top: 25px;">RMI Growth Predictions</h3>
+
+    <div style="background-color: #f8f9fa; padding: 10px; border-radius: 3px; margin-bottom: 15px;">
+      <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; font-size: 13px;">
+        <div><strong>Wavenumber (k):</strong> <span id="rmiWavenumber"></span> rad/m</div>
+        <div><strong>ka₀:</strong> <span id="rmiKa0"></span></div>
+        <div><strong>Initial Growth Rate:</strong> <span id="rmiGrowthRate"></span> m/s</div>
+        <div><strong>Doubling Time:</strong> <span id="rmiDoublingTime"></span> ms</div>
+        <div><strong>Time at Downstream Location:</strong> <span id="rmiTimeAtLocation"></span> ms</div>
+        <div><strong>Amplitude at Location:</strong> <span id="rmiAmplitudeAtLocation"></span> mm</div>
+      </div>
+    </div>
+
+    <canvas id="rmiGrowthCanvas" width="800" height="400" style="border: 1px solid #dee2e6; border-radius: 3px; max-width: 100%;"></canvas>
+
+    <div style="margin-top: 10px; font-size: 13px; color: #6c757d;">
+      <strong>Models:</strong>
+      <span style="color: #0066cc;">━━</span> Linear (Richtmyer) |
+      <span style="color: #28a745;">━━</span> Nonlinear (Dimonte-Ramaprabhu) |
+      <span style="color: #ff9800;">┊┊</span> Downstream location
+    </div>
+  </div>
+
+</div>
 
 <hr>
 
@@ -2337,6 +2558,8 @@ window.h5wasmReady = h5wasm.ready.then(() => {
 </script>
 
 <!-- Load JavaScript modules -->
+<script src="js/riemann-solver.js"></script>
+<script src="js/rmi-growth.js"></script>
 <script src="js/shock-import.js"></script>
 <script src="js/xt-mixture.js"></script>
 <script src="js/time-integrators.js"></script>
@@ -3362,16 +3585,474 @@ function showXTMessage(message, type) {
         'warning': '#ffc107',
         'error': '#dc3545'
     };
-    
+
     var container = document.getElementById('xtMessageContainer');
     container.innerHTML = '<div style="padding:12px;margin:10px 0;border-radius:3px;background-color:' + colors[type] + '20;border-left:4px solid ' + colors[type] + ';color:' + colors[type] + ';">' + message + '</div>';
-    
+
     if (type === 'success') {
         setTimeout(function() {
             container.innerHTML = '';
         }, 5000);
     }
 }
+
+// ==========================================
+// Shocked-Interface Calculation Functions
+// ==========================================
+
+let heavyGasMixtureData = [];
+
+function toggleInterfaceSection() {
+    const enabled = document.getElementById('enableInterfaceCalc').checked;
+    const section = document.getElementById('interfaceSection');
+    section.style.display = enabled ? 'block' : 'none';
+
+    if (enabled) {
+        // Delay to ensure gasDatabase is loaded
+        setTimeout(populateHeavyGasSelect, 0);
+    }
+}
+
+function populateHeavyGasSelect() {
+    const select = document.getElementById('interfaceHeavyGas');
+
+    // Clear existing options except first
+    while (select.options.length > 1) {
+        select.remove(1);
+    }
+
+    // Add standard gases (gasDatabase is an object, not array)
+    for (const id in gasDatabase) {
+        if (gasDatabase.hasOwnProperty(id)) {
+            const gas = gasDatabase[id];
+            const option = document.createElement('option');
+            option.value = id;
+            option.textContent = gas.name;
+            select.appendChild(option);
+        }
+    }
+
+    // Add custom mixture option
+    const customOption = document.createElement('option');
+    customOption.value = 'custom';
+    customOption.textContent = 'Custom Mixture';
+    select.appendChild(customOption);
+}
+
+function updateInterfaceHeavyGas() {
+    const gasId = document.getElementById('interfaceHeavyGas').value;
+    const customDiv = document.getElementById('heavyGasCustomMixture');
+
+    if (gasId === 'custom') {
+        customDiv.style.display = 'block';
+        if (heavyGasMixtureData.length === 0) {
+            addHeavyGasMixtureRow();
+        }
+    } else {
+        customDiv.style.display = 'none';
+    }
+}
+
+function addHeavyGasMixtureRow() {
+    const id = 'heavyMix_' + Date.now();
+    heavyGasMixtureData.push({ id, gasId: '', fraction: 0 });
+    renderHeavyGasMixture();
+}
+
+function removeHeavyGasMixtureRow(id) {
+    heavyGasMixtureData = heavyGasMixtureData.filter(row => row.id !== id);
+    renderHeavyGasMixture();
+}
+
+function renderHeavyGasMixture() {
+    const container = document.getElementById('heavyGasMixtureList');
+    container.innerHTML = '';
+
+    heavyGasMixtureData.forEach((row, index) => {
+        const div = document.createElement('div');
+        div.style.cssText = 'display: flex; align-items: center; gap: 10px; margin-bottom: 8px;';
+
+        const select = document.createElement('select');
+        select.style.width = '150px';
+        select.onchange = (e) => { row.gasId = e.target.value; };
+
+        const defaultOpt = document.createElement('option');
+        defaultOpt.value = '';
+        defaultOpt.textContent = '-- Select Gas --';
+        select.appendChild(defaultOpt);
+
+        for (const id in gasDatabase) {
+            if (gasDatabase.hasOwnProperty(id)) {
+                const gas = gasDatabase[id];
+                const opt = document.createElement('option');
+                opt.value = id;
+                opt.textContent = gas.name;
+                opt.selected = id === row.gasId;
+                select.appendChild(opt);
+            }
+        }
+
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.value = row.fraction;
+        input.min = '0';
+        input.max = '1';
+        input.step = '0.01';
+        input.style.width = '80px';
+        input.onchange = (e) => { row.fraction = parseFloat(e.target.value); };
+
+        const label = document.createElement('span');
+        label.textContent = 'mole fraction';
+        label.style.fontSize = '12px';
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.textContent = 'Remove';
+        removeBtn.style.cssText = 'font-size: 11px; padding: 4px 8px; background-color: #dc3545; border-color: #dc3545; color: white;';
+        removeBtn.onclick = () => removeHeavyGasMixtureRow(row.id);
+
+        div.appendChild(select);
+        div.appendChild(input);
+        div.appendChild(label);
+        div.appendChild(removeBtn);
+        container.appendChild(div);
+    });
+}
+
+function calculateHeavyGasMixture() {
+    let totalFraction = 0;
+    let avgGamma = 0;
+    let avgMW = 0;
+
+    for (const row of heavyGasMixtureData) {
+        if (!row.gasId || row.fraction <= 0) {
+            alert('Error: All heavy gas mixture components must have a gas selected and positive mole fraction');
+            return null;
+        }
+
+        const gas = getGasById(row.gasId);
+        if (!gas) {
+            alert('Error: Invalid gas in heavy gas mixture');
+            return null;
+        }
+
+        totalFraction += row.fraction;
+        avgMW += row.fraction * gas.mw;
+        avgGamma += row.fraction * gas.gamma;
+    }
+
+    if (Math.abs(totalFraction - 1.0) > 0.01) {
+        alert('Error: Heavy gas mole fractions must sum to 1.0 (current sum: ' + totalFraction.toFixed(3) + ')');
+        return null;
+    }
+
+    return {
+        gamma: avgGamma / totalFraction,
+        mw: avgMW / totalFraction
+    };
+}
+
+function calculateInterface() {
+    try {
+        // Get driven (light) gas properties from main shock calculation
+        const drivenGasId = document.Shock.drivengas.value;
+        let lightGamma, lightMW;
+
+        if (drivenGasId === 'custom') {
+            const drivenProps = calculateMixtureProperties('driven');
+            if (!drivenProps) return;
+            lightGamma = drivenProps.gamma;
+            lightMW = drivenProps.mw;
+        } else {
+            const drivenGas = getGasById(drivenGasId);
+            if (!drivenGas) {
+                alert('Error: Please run shock calculation first');
+                return;
+            }
+            lightGamma = drivenGas.gamma;
+            lightMW = drivenGas.mw;
+        }
+
+        // Get shocked state properties from main calculation
+        const p2 = parseFloat(document.Shock.pshocked.value) * 1e6; // Convert MPa to Pa
+        const t2 = parseFloat(document.Shock.tshocked.value);
+        const u2 = parseFloat(document.Shock.ushocked.value); // Particle velocity in shocked gas
+
+        if (isNaN(p2) || isNaN(t2) || isNaN(u2)) {
+            alert('Error: Please run shock calculation first');
+            return;
+        }
+
+        // Get heavy gas properties
+        const heavyGasId = document.getElementById('interfaceHeavyGas').value;
+        let heavyGamma, heavyMW;
+
+        if (!heavyGasId) {
+            alert('Error: Please select heavy gas');
+            return;
+        }
+
+        if (heavyGasId === 'custom') {
+            const heavyProps = calculateHeavyGasMixture();
+            if (!heavyProps) return;
+            heavyGamma = heavyProps.gamma;
+            heavyMW = heavyProps.mw;
+        } else {
+            const heavyGas = getGasById(heavyGasId);
+            if (!heavyGas) {
+                alert('Error: Invalid heavy gas selection');
+                return;
+            }
+            heavyGamma = heavyGas.gamma;
+            heavyMW = heavyGas.mw;
+        }
+
+        // Get initial conditions for heavy gas
+        const p1 = parseFloat(document.Shock.pinit.value);
+        const tHeavy = parseFloat(document.getElementById('interfaceHeavyTemp').value);
+
+        if (isNaN(tHeavy) || tHeavy <= 0) {
+            alert('Error: Heavy gas temperature must be positive');
+            return;
+        }
+
+        // Solve Riemann problem at interface
+        // Left state: shocked light gas (moving at u2)
+        // Right state: ambient heavy gas (at rest)
+        const shockedLightState = {
+            p: p2,
+            T: t2,
+            u: u2,  // Shocked gas is already moving
+            gamma: lightGamma,
+            mw: lightMW
+        };
+
+        const ambientHeavyState = {
+            p: p1,
+            T: tHeavy,
+            u: 0,  // Heavy gas initially at rest
+            gamma: heavyGamma,
+            mw: heavyMW
+        };
+
+        const result = solveShockedInterface(shockedLightState, ambientHeavyState);
+
+        // Display results
+        document.getElementById('interfaceVelocity').value = result.interfaceVelocity.toPrecision(6);
+        document.getElementById('interfacePressure').value = (result.interfacePressure / 1e6).toPrecision(6);
+        document.getElementById('atwoodNumber').value = result.atwoodNumber.toPrecision(6);
+        document.getElementById('waveConfig').value =
+            `Left: ${result.waveConfig.left}, Right: ${result.waveConfig.right}`;
+
+        // Light gas (left) post-shock
+        document.getElementById('lightGasPressure').value = (result.lightGasPost.p / 1e6).toPrecision(6);
+        document.getElementById('lightGasTemp').value = result.lightGasPost.T.toPrecision(6);
+        document.getElementById('lightGasDensity').value = result.lightGasPost.rho.toPrecision(6);
+        document.getElementById('lightGasSound').value = result.lightGasPost.a.toPrecision(6);
+
+        // Heavy gas (right) post-shock
+        document.getElementById('heavyGasPressure').value = (result.heavyGasPost.p / 1e6).toPrecision(6);
+        document.getElementById('heavyGasTemp').value = result.heavyGasPost.T.toPrecision(6);
+        document.getElementById('heavyGasDensity').value = result.heavyGasPost.rho.toPrecision(6);
+        document.getElementById('heavyGasSound').value = result.heavyGasPost.a.toPrecision(6);
+
+        // Calculate RMI growth predictions
+        const lambda = parseFloat(document.getElementById('perturbWavelength').value) / 1000; // mm to m
+        const a0 = parseFloat(document.getElementById('perturbAmplitude').value) / 1000; // mm to m
+        const downstreamDist = parseFloat(document.getElementById('rmiDownstreamDist').value) / 1000; // mm to m
+
+        const deltaU = calculateVelocityJump(result.interfaceVelocity, 0);
+
+        // Calculate time to reach downstream distance
+        const tMax = downstreamDist / result.interfaceVelocity;
+
+        const rmiParams = calculateRMIParameters({
+            eta0: a0,
+            lambda: lambda,
+            A: result.atwoodNumber,
+            deltaU: deltaU
+        });
+
+        // Calculate amplitude at downstream location using each model
+        const k = 2 * Math.PI / lambda;
+        const amplitudeLinear = rmiLinearAmplitude(a0, result.atwoodNumber, k, deltaU, tMax);
+        // const amplitudeZS = rmiZhangSohnAmplitude(a0, result.atwoodNumber, k, deltaU, tMax);
+        const amplitudeDR = rmiDimonteAmplitude(a0, result.atwoodNumber, k, deltaU, tMax);
+
+        // Display RMI parameters
+        document.getElementById('rmiWavenumber').textContent = rmiParams.wavenumber.toPrecision(4);
+        document.getElementById('rmiKa0').textContent = rmiParams.ka0.toPrecision(4);
+        document.getElementById('rmiGrowthRate').textContent = rmiParams.initialGrowthRate.toPrecision(4);
+        document.getElementById('rmiDoublingTime').textContent = (rmiParams.doublingTime * 1000).toPrecision(4);
+        document.getElementById('rmiTimeAtLocation').textContent = (tMax * 1000).toPrecision(4);
+        document.getElementById('rmiAmplitudeAtLocation').textContent =
+            `Linear: ${(amplitudeLinear * 1000).toPrecision(3)} | DR: ${(amplitudeDR * 1000).toPrecision(3)}`;
+
+        // Generate and plot growth curves
+        const growth = calculateGrowthTimeSeries({
+            eta0: a0,
+            lambda: lambda,
+            A: result.atwoodNumber,
+            deltaU: deltaU,
+            tMax: tMax,
+            numPoints: 200
+        });
+
+        plotRMIGrowth(growth, downstreamDist, result.interfaceVelocity);
+
+        // Show results section
+        document.getElementById('interfaceResults').style.display = 'block';
+
+    } catch (error) {
+        console.error('Error in interface calculation:', error);
+        alert('An error occurred during interface calculation: ' + error.message);
+    }
+}
+
+function plotRMIGrowth(growth, downstreamDist, interfaceVelocity) {
+    const canvas = document.getElementById('rmiGrowthCanvas');
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+
+    // Clear canvas
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+
+    // Convert times to ms and amplitudes to mm for plotting
+    const timesMs = growth.times.map(t => t * 1000);
+    const linearMm = growth.linear.map(a => a * 1000);
+    // const zhangSohnMm = growth.zhangSohn.map(a => a * 1000);
+    const dimonteMm = growth.dimonte.map(a => a * 1000);
+
+    // Time at downstream location
+    const tDownstream = (downstreamDist / interfaceVelocity) * 1000; // ms
+
+    // Find data ranges
+    const tMin = 0;
+    const tMax = Math.max(...timesMs);
+    const aMin = Math.min(0, ...linearMm, ...dimonteMm);
+    const aMax = Math.max(...linearMm, ...dimonteMm);
+
+    // Add 10% padding
+    const aRange = aMax - aMin;
+    const aMinPlot = aMin - 0.1 * aRange;
+    const aMaxPlot = aMax + 0.1 * aRange;
+
+    // Margins
+    const margin = { left: 80, right: 40, top: 40, bottom: 60 };
+    const plotWidth = width - margin.left - margin.right;
+    const plotHeight = height - margin.top - margin.bottom;
+
+    // Scaling functions
+    const scaleX = (t) => margin.left + (t - tMin) / (tMax - tMin) * plotWidth;
+    const scaleY = (a) => margin.top + plotHeight - (a - aMinPlot) / (aMaxPlot - aMinPlot) * plotHeight;
+
+    // Draw axes
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(margin.left, margin.top);
+    ctx.lineTo(margin.left, margin.top + plotHeight);
+    ctx.lineTo(margin.left + plotWidth, margin.top + plotHeight);
+    ctx.stroke();
+
+    // Draw grid
+    ctx.strokeStyle = '#e0e0e0';
+    ctx.lineWidth = 1;
+    const numGridLines = 5;
+
+    for (let i = 0; i <= numGridLines; i++) {
+        const t = tMin + (tMax - tMin) * i / numGridLines;
+        const x = scaleX(t);
+        ctx.beginPath();
+        ctx.moveTo(x, margin.top);
+        ctx.lineTo(x, margin.top + plotHeight);
+        ctx.stroke();
+
+        const a = aMinPlot + (aMaxPlot - aMinPlot) * i / numGridLines;
+        const y = scaleY(a);
+        ctx.beginPath();
+        ctx.moveTo(margin.left, y);
+        ctx.lineTo(margin.left + plotWidth, y);
+        ctx.stroke();
+    }
+
+    // Plot curves
+    function plotCurve(data, color, lineWidth = 2) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = lineWidth;
+        ctx.beginPath();
+        for (let i = 0; i < timesMs.length; i++) {
+            const x = scaleX(timesMs[i]);
+            const y = scaleY(data[i]);
+            if (i === 0) {
+                ctx.moveTo(x, y);
+            } else {
+                ctx.lineTo(x, y);
+            }
+        }
+        ctx.stroke();
+    }
+
+    plotCurve(linearMm, '#0066cc', 2);
+    // plotCurve(zhangSohnMm, '#dc3545', 2);
+    plotCurve(dimonteMm, '#28a745', 2);
+
+    // Mark downstream location with vertical line
+    if (tDownstream >= tMin && tDownstream <= tMax) {
+        const xDown = scaleX(tDownstream);
+        ctx.strokeStyle = '#ff9800';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.moveTo(xDown, margin.top);
+        ctx.lineTo(xDown, margin.top + plotHeight);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Label
+        ctx.fillStyle = '#ff9800';
+        ctx.font = 'bold 11px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('Downstream', xDown, margin.top - 5);
+    }
+
+    // Axis labels
+    ctx.fillStyle = '#000000';
+    ctx.font = '14px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('Time (ms)', margin.left + plotWidth / 2, height - 10);
+
+    ctx.save();
+    ctx.translate(15, margin.top + plotHeight / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText('Amplitude (mm)', 0, 0);
+    ctx.restore();
+
+    // Title
+    ctx.font = 'bold 16px Arial';
+    ctx.fillText('RMI Perturbation Growth', width / 2, 25);
+
+    // Tick labels
+    ctx.font = '12px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    for (let i = 0; i <= numGridLines; i++) {
+        const t = tMin + (tMax - tMin) * i / numGridLines;
+        const x = scaleX(t);
+        ctx.fillText(t.toFixed(1), x, margin.top + plotHeight + 5);
+    }
+
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    for (let i = 0; i <= numGridLines; i++) {
+        const a = aMinPlot + (aMaxPlot - aMinPlot) * i / numGridLines;
+        const y = scaleY(a);
+        ctx.fillText(a.toFixed(2), margin.left - 10, y);
+    }
+}
+
 </script>
 
 </body>

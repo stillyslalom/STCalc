@@ -36,7 +36,14 @@ function loadCustomGases() {
             return customGases;
         }
     } catch (e) {
-        console.error('Error loading custom gases:', e);
+        console.warn('Could not load custom gases (localStorage may be corrupted). Starting with empty list.');
+        // Try to clear corrupted data, but don't fail if this also errors
+        try {
+            localStorage.removeItem('wistl_custom_gases');
+        } catch (clearError) {
+            // If localStorage is completely corrupted at browser level, suggest manual fix
+            console.warn('To fix localStorage corruption: Open Settings > Privacy & Security > Cookies and Site Data > Clear Data, or try Private Browsing mode.');
+        }
     }
     return {};
 }
