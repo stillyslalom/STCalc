@@ -998,6 +998,12 @@ window.onload = function() {
     updateCustomGasList();
     loadCalculatorState();
     clearOutputFields();
+
+    // Add reset event listener to clear output fields
+    document.Shock.addEventListener('reset', function() {
+        // Use setTimeout to ensure the form reset completes first
+        setTimeout(clearOutputFields, 0);
+    });
 };
 
 // Save calculator state to localStorage
