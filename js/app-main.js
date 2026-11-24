@@ -200,6 +200,12 @@ function saveShockState() {
     history.replaceState(null, '', '?' + shockStateToQuery(state) + location.hash);
 }
 
+/** Links refer to NASA database species by name ("n:C3H8"). */
+function linkNeedsNasaDatabase() {
+    const params = new URLSearchParams(location.search);
+    return /(^|,)n:/.test((params.get('dn') || '') + ',' + (params.get('dr') || ''));
+}
+
 /** @returns {boolean} true when the state came from a shared link */
 function loadShockState() {
     try {
@@ -394,14 +400,16 @@ function gasInUse(id) {
 function renderGasList() {
     const gases = Object.values(GasLibrary.custom);
     byId('gasList').replaceChildren(...gases.map(function (gas) {
-        const props = gas.pinf > 0
+        const props = gas.fit
+            ? 'NASA fit, γ ' + formatSig(gas.gamma, 5) + ' at 298 K, ' + formatSig(gas.mw, 6) + ' g/mol'
+            : gas.pinf > 0
             ? 'γ ' + formatSig(gas.gamma, 5) + ', p∞ ' + formatSig(gas.pinf / 1e6, 5) + ' MPa, ' +
               formatSig(eosDensity(gas, STP_REF_P, STP_REF_T), 5) + ' kg/m³'
             : 'γ ' + formatSig(gas.gamma, 5) + ', ' + formatSig(gas.mw, 6) + ' g/mol';
         return el('div', { class: 'gas-entry' },
             el('strong', {}, gas.name),
             el('span', { class: 'props' }, props),
-            el('button', { type: 'button', class: 'secondary small', onclick: function () { editGasInForm(gas.id); } }, 'Edit'),
+            gas.fit ? null : el('button', { type: 'button', class: 'secondary small', onclick: function () { editGasInForm(gas.id); } }, 'Edit'),
             el('button', {
                 type: 'button', class: 'danger small',
                 onclick: function () {
@@ -412,6 +420,46 @@ function renderGasList() {
                 }
             }, 'Delete'));
     }));
+}
+
+/* ------------------------------------------------------------------ */
+/* NASA species search                                                 */
+/* ------------------------------------------------------------------ */
+
+const NASA_RESULT_LIMIT = 24;
+
+function renderNasaResults(database) {
+    const container = byId('nasaResults');
+    const query = byId('nasaSearch').value;
+    const matches = searchNasaSpecies(database, query);
+    if (!query.trim()) {
+        container.replaceChildren();
+        return;
+    }
+    if (matches.length === 0) {
+        container.replaceChildren('No species match. Try a formula such as C3H8.');
+        return;
+    }
+    const chips = matches.slice(0, NASA_RESULT_LIMIT).map(function (species) {
+        const added = GasLibrary.findSpecies(species) !== null;
+        return el('button', {
+            type: 'button', class: 'secondary small', disabled: added,
+            title: formatSig(database[species].mw, 5) + ' g/mol' + (added ? ' (already added)' : ''),
+            onclick: function () {
+                GasLibrary.addSpecies(species, database[species]);
+                showMessages(byId('gasMessages'), [{ type: 'success', text: 'Added ' + species + '.' }]);
+                renderNasaResults(database);
+            }
+        }, species);
+    });
+    const more = matches.length - chips.length;
+    container.replaceChildren(...chips, more > 0 ? '+' + more + ' more' : '');
+}
+
+function searchNasa() {
+    loadNasaDatabase().then(renderNasaResults, function (error) {
+        byId('nasaResults').replaceChildren(error.message);
+    });
 }
 
 /* ------------------------------------------------------------------ */
@@ -549,6 +597,13 @@ document.addEventListener('DOMContentLoaded', function () {
     });
     openTarget();
 
+    byId('nasaSearch').addEventListener('input', searchNasa);
+    byId('nasaSearch').addEventListener('focus', function () { loadNasaDatabase().catch(function () {}); });
+
     // A shared link is calculated immediately so the reader sees its results
-    if (loadShockState()) calcShock();
+    const restore = function () {
+        if (loadShockState()) calcShock();
+    };
+    if (linkNeedsNasaDatabase()) loadNasaDatabase().then(restore, restore);
+    else restore();
 });

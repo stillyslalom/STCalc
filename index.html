@@ -91,10 +91,15 @@
 </form>
 
 <details class="panel" id="gasLibrary">
-  <summary title="Saved in this browser and available in every gas list. Liquids use the stiffened-gas equation of state.">Custom gases and liquids</summary>
+  <summary title="Add gases from the NASA database or define your own. Saved in this browser and available in every gas list.">More gases and liquids</summary>
+  <div class="inline-form">
+    <label title="About 1000 gases with NASA polynomial fits. Pick one to add it to every gas list.">Add from NASA database
+      <input type="search" id="nasaSearch" placeholder="Formula or name, e.g. C3H8" autocomplete="off"></label>
+  </div>
+  <div id="nasaResults" class="chip-list"></div>
   <form id="gasForm" class="inline-form" novalidate>
     <input type="hidden" id="gasFormId">
-    <label>Name <input type="text" id="gasFormName" placeholder="e.g. Methane" maxlength="40"></label>
+    <label>Define a gas <input type="text" id="gasFormName" placeholder="Name" maxlength="40"></label>
     <label>Equation of state
       <select id="gasFormEos">
         <option value="ideal">Ideal gas</option>

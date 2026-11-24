@@ -5,6 +5,7 @@ const path = require('path');
 const vm = require('vm');
 
 const FILES = [
+    '../data/nasa9-species.js',
     'nasa9-data.js',
     'thermo.js',
     'gas-data.js',
@@ -24,7 +25,7 @@ function load() {
     return vm.runInContext(`({
         RU, GAS_DATABASE, stiffenedEffectiveMw, eosDensity, eosSoundSpeed,
         mixtureProperties, validateGasDefinition, gasComposition,
-        NASA9_DATA, makeThermo,
+        NASA9_DATA, NASA9_ALL_SPECIES, NASA_ALIASES, searchNasaSpecies, nasa9Species, makeThermo,
         ShockInputError, computeShockTube, machFromDriverPressure, maxMachForDriver,
         solveExactRiemann, solveShockedInterface,
         EulerSolver

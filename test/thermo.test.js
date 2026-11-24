@@ -113,3 +113,34 @@ test('inverse solve and unreachable warning with variable gamma', () => {
     assert.equal(far.state4.p, null);
     assert.ok(far.warnings.some(w => w.code === 'unreachable'));
 });
+
+test('every species in the NASA database gives physical properties', () => {
+    const names = Object.keys(lib.NASA9_ALL_SPECIES);
+    assert.ok(names.length > 900, `only ${names.length} species`);
+    for (const name of names) {
+        lib.NASA9_DATA[name] = lib.NASA9_ALL_SPECIES[name];
+        const sp = lib.nasa9Species(name);
+        assert.ok(sp.mw > 0, `${name}: molecular weight`);
+        for (const T of [100, sp.tMin, 300, 1000, sp.tMax, 30000]) {
+            const cp = sp.cpR(T);
+            assert.ok(isFinite(cp) && cp > 1.4, `${name}: cp/R = ${cp} at ${T} K`);
+            assert.ok(isFinite(sp.hR(T)) && isFinite(sp.sR(T)), `${name}: h or s at ${T} K`);
+        }
+    }
+    // Built-in fits are the same records
+    assert.deepEqual(JSON.parse(JSON.stringify(lib.NASA9_ALL_SPECIES['N2'])), JSON.parse(JSON.stringify(lib.NASA9_DATA['N2'])));
+});
+
+test('species search', () => {
+    const db = lib.NASA9_ALL_SPECIES;
+    assert.equal(lib.searchNasaSpecies(db, 'c3h8')[0], 'C3H8');
+    assert.equal(lib.searchNasaSpecies(db, 'H2')[0], 'H2');
+    assert.equal(lib.searchNasaSpecies(db, 'butane')[0], 'C4H10,n-butane');
+    assert.equal(lib.searchNasaSpecies(db, '  ').length, 0);
+    assert.equal(lib.searchNasaSpecies(db, 'zzzz').length, 0);
+    for (const alias in lib.NASA_ALIASES) {
+        const target = lib.NASA_ALIASES[alias];
+        assert.ok(db[target], `alias ${alias} points at missing species ${target}`);
+        assert.equal(lib.searchNasaSpecies(db, alias)[0], target, `search for ${alias}`);
+    }
+});

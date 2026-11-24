@@ -60,7 +60,8 @@ function normalizeGas(gas) {
         gamma: gas.gamma,
         mw: gas.mw,
         pinf: gas.pinf > 0 ? gas.pinf : 0,
-        nasa: gas.nasa || null
+        nasa: gas.nasa || null,
+        fit: gas.fit || null       // NASA-9 record of a species added from the database
     };
 }
 
@@ -157,10 +158,47 @@ function mixtureProperties(components, gases) {
     };
 }
 
+// Common names for formulas people are likely to look for
+const NASA_ALIASES = {
+    water: 'H2O', steam: 'H2O', ammonia: 'NH3', propane: 'C3H8', ethane: 'C2H6', ethylene: 'C2H4',
+    acetylene: 'C2H2,acetylene', benzene: 'C6H6', ethanol: 'C2H5OH', methanol: 'CH3OH', methane: 'CH4',
+    hydrogen: 'H2', deuterium: 'D2', nitrogen: 'N2', oxygen: 'O2', ozone: 'O3', fluorine: 'F2', chlorine: 'CL2',
+    'carbon monoxide': 'CO', 'carbon dioxide': 'CO2', 'nitrous oxide': 'N2O', 'nitric oxide': 'NO',
+    'nitrogen dioxide': 'NO2', 'sulfur dioxide': 'SO2', 'hydrogen sulfide': 'H2S', 'hydrogen chloride': 'HCL',
+    helium: 'He', neon: 'Ne', argon: 'Ar', krypton: 'Kr', xenon: 'Xe', radon: 'Rn', freon: 'CF4', r14: 'CF4'
+};
+
+/**
+ * Species matching a query, best first: exact name or alias, then names
+ * starting with the query, then names containing it.
+ */
+function searchNasaSpecies(database, query) {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    const typed = query.trim();
+    const alias = NASA_ALIASES[q] || '';
+    const ranked = [];
+    for (const name in database) {
+        const n = name.toLowerCase();
+        const formula = n.split(',')[0];
+        let rank;
+        // Case separates e.g. CO (carbon monoxide) from Co (cobalt)
+        if (name === typed || name === alias) rank = -1;
+        else if (n === q || formula === q) rank = 0;
+        else if (n.startsWith(q)) rank = 1;
+        else if (n.includes(q)) rank = 2;
+        else continue;
+        ranked.push([rank, name]);
+    }
+    ranked.sort(function (a, b) { return a[0] - b[0] || a[1].length - b[1].length || a[1].localeCompare(b[1]); });
+    return ranked.map(function (entry) { return entry[1]; });
+}
+
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         RU, STP_REF_T, STP_REF_P, GAS_DATABASE,
         stiffenedEffectiveMw, normalizeGas, isStiffened, gasConstant, gasComposition,
-        eosDensity, eosSoundSpeed, validateGasDefinition, mixtureProperties
+        eosDensity, eosSoundSpeed, validateGasDefinition, mixtureProperties,
+        NASA_ALIASES, searchNasaSpecies
     };
 }

@@ -311,6 +311,7 @@ const GasLibrary = {
             for (const gas of stored) {
                 if (!gas || typeof gas.id !== 'string' || validateGasDefinition(gas)) continue;
                 this.custom[gas.id] = { id: gas.id, ...normalizeGas(gas) };
+                this.registerFit(this.custom[gas.id]);
             }
         } catch (e) {
             this.storageWorks = false;
@@ -326,6 +327,34 @@ const GasLibrary = {
             this.storageWorks = false;
         }
         this.listeners.forEach(function (listener) { listener(); });
+    },
+
+    /** Make the NASA-9 fit of a database species available to thermo.js. */
+    registerFit(gas) {
+        if (gas.fit && gas.nasa) NASA9_DATA[gas.nasa[0][0]] = gas.fit;
+    },
+
+    /** Id of the library entry for a NASA database species, if it was added. */
+    findSpecies(species) {
+        for (const id in this.custom) {
+            const gas = this.custom[id];
+            if (gas.fit && gas.nasa[0][0] === species) return id;
+        }
+        return null;
+    },
+
+    /**
+     * Add a species from the NASA database (see loadNasaDatabase). Its
+     * constant gamma, used by the constant-gamma model, is taken at 298.15 K.
+     * @returns {string} id of the new or existing library entry
+     */
+    addSpecies(species, fit) {
+        const existing = this.findSpecies(species);
+        if (existing) return existing;
+        NASA9_DATA[species] = fit;
+        const cp = nasa9Species(species).cpR(298.15);
+        const name = this.findByName(species) ? species + ' (NASA)' : species;
+        return this.put({ name: name, gamma: cp / (cp - 1), mw: fit.mw, nasa: [[species, 1]], fit: fit });
     },
 
     /** All gases keyed by id: built-in first, then custom. */
@@ -367,6 +396,7 @@ const GasLibrary = {
         if (this.findByName(gas.name, id)) throw userError('A gas named "' + gas.name + '" already exists.');
         const gasId = id || this.nextId();
         this.custom[gasId] = { id: gasId, ...gas };
+        this.registerFit(this.custom[gasId]);
         this.save();
         return gasId;
     },
@@ -385,7 +415,7 @@ const GasLibrary = {
         const gases = this.all();
         for (const id in gases) {
             const g = gases[id];
-            if (g.name === gas.name && g.gamma === gas.gamma && g.mw === gas.mw && g.pinf === gas.pinf) return id;
+            if (g.name === gas.name && g.gamma === gas.gamma && g.mw === gas.mw && g.pinf === gas.pinf && !g.fit) return id;
         }
         let name = gas.name;
         for (let n = 2; this.findByName(name); n++) name = gas.name + ' (' + n + ')';
@@ -576,11 +606,18 @@ GasLibrary.onChange(function () {
 function encodeGasId(id) {
     if (!GasLibrary.isCustom(id)) return encodeURIComponent(id);
     const g = GasLibrary.custom[id];
+    if (g.fit) return 'n:' + encodeURIComponent(g.nasa[0][0]);
     return ['c', encodeURIComponent(g.name), g.gamma, g.mw, g.pinf].join(':');
 }
 
 function decodeGasId(text) {
     const parts = text.split(':');
+    if (parts[0] === 'n' && parts.length === 2) {
+        // Needs the NASA database: see linkNeedsNasaDatabase()
+        const species = decodeURIComponent(parts[1]);
+        const fit = typeof NASA9_ALL_SPECIES !== 'undefined' && NASA9_ALL_SPECIES[species];
+        return fit ? GasLibrary.addSpecies(species, fit) : (GasLibrary.findSpecies(species) || '');
+    }
     if (parts[0] === 'c' && parts.length === 5) {
         return GasLibrary.ensure({
             name: decodeURIComponent(parts[1]),
@@ -590,7 +627,7 @@ function decodeGasId(text) {
     return decodeURIComponent(text);
 }
 
-/** e.g. "1", "c:Methane:1.31:16.04:0" or "mix,4@0.9,2@0.1" */
+/** e.g. "1", "c:Methane:1.31:16.04:0", "n:C3H8" or "mix,4@0.9,2@0.1" */
 function encodeGasValue(value) {
     if (value.gasId !== MIXTURE_VALUE) return encodeGasId(value.gasId);
     return ['mix'].concat(value.mixture.filter(function (row) { return row.gasId; }).map(function (row) {
@@ -607,4 +644,27 @@ function decodeGasValue(text) {
             return { gasId: decodeGasId(part.slice(0, at)), fraction: part.slice(at + 1) };
         })
     };
+}
+
+/* ------------------------------------------------------------------ */
+/* NASA species database (about 1000 gases, loaded on first use)       */
+/* ------------------------------------------------------------------ */
+
+let nasaDatabasePromise = null;
+
+/** @returns {Promise<Object>} species name -> NASA-9 record */
+function loadNasaDatabase() {
+    if (!nasaDatabasePromise) {
+        nasaDatabasePromise = new Promise(function (resolve, reject) {
+            const script = el('script', { src: 'data/nasa9-species.js' });
+            script.onload = function () { resolve(NASA9_ALL_SPECIES); };
+            script.onerror = function () {
+                nasaDatabasePromise = null;   // allow a retry
+                script.remove();
+                reject(new Error('Could not load the NASA species database.'));
+            };
+            document.head.append(script);
+        });
+    }
+    return nasaDatabasePromise;
 }
