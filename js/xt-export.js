@@ -139,6 +139,8 @@ async function exportXTDataHDF5() {
         
         // Write coordinates
         f.get('coordinates').create_dataset({name: 'x', data: xtResults.x, dtype: '<d'});
+        // Tube cross-section at each cell (relative units)
+        f.get('coordinates').create_dataset({name: 'area', data: xtResults.area, dtype: '<d'});
         const timeArray = xtResults.xtData.map(snap => snap.t);
         f.get('coordinates').create_dataset({name: 't', data: timeArray, dtype: '<d'});
         

@@ -58,6 +58,16 @@ class EulerSolver {
         this.tabulated = false;
         this.alphaAtHalfStep = false;
 
+        // Cross-sectional area (quasi-one-dimensional flow). Slabs may have
+        // different areas; each change is a linear transition of this length
+        // (m) inside the wider slab, ending at the slab boundary. By default
+        // 4% of the tube length, and never fewer than 8 cells: an abrupt step
+        // loses several percent of the shock strength numerically.
+        this.variableArea = false;
+        this.areaTransition = config.areaTransition;
+        this.areaCell = null;
+        this.areaFace = null;
+
         // Face arrays
         this.flux = null;
         this.faceVelocity = new Float64Array(this.nx + 1);
@@ -91,7 +101,9 @@ class EulerSolver {
      * Initialize the shock tube with gas slabs
      * @param {Array} slabs - Array of {gasId, gamma, mw, pinf, pressure, temperature, length, velocity}.
      *   A slab may also carry thermo: a composition for makeThermo() (thermo.js);
-     *   its specific heats then depend on temperature.
+     *   its specific heats then depend on temperature. An optional area gives
+     *   the tube cross-section over the slab's initial extent (any units;
+     *   only ratios matter).
      */
     initialize(slabs) {
         const mixed = this.interfaceMethod === 'mixed';
@@ -160,6 +172,34 @@ class EulerSolver {
         // Slab edges
         const edges = [0];
         for (const slab of slabs) edges.push(edges[edges.length - 1] + slab.length);
+
+        // Tube cross-section: constant over each slab's initial extent, with a
+        // linear ramp across each boundary where it changes
+        const areas = slabs.map(slab => slab.area > 0 ? slab.area : 1);
+        this.variableArea = areas.some(a => a !== areas[0]);
+        this.areaFace = new Float64Array(this.nx + 1);
+        this.areaCell = new Float64Array(this.nx);
+        const wanted = this.areaTransition > 0 ? this.areaTransition : 0.04 * totalLength;
+        const ramps = [];
+        for (let b = 1; b < slabs.length; b++) {
+            if (areas[b - 1] === areas[b]) continue;
+            const wider = areas[b - 1] > areas[b] ? b - 1 : b;
+            const width = Math.min(Math.max(wanted, 8 * this.dx), 0.5 * slabs[wider].length);
+            ramps.push(wider === b - 1
+                ? { x0: edges[b] - width, x1: edges[b], a0: areas[b - 1], a1: areas[b] }
+                : { x0: edges[b], x1: edges[b] + width, a0: areas[b - 1], a1: areas[b] });
+        }
+        for (let i = 0; i <= this.nx; i++) {
+            const x = i * this.dx;
+            let s = 0;
+            while (s < slabs.length - 1 && x >= edges[s + 1]) s++;
+            let area = areas[s];
+            for (const r of ramps) {
+                if (x >= r.x0 && x <= r.x1) area = r.a0 + (r.a1 - r.a0) * (x - r.x0) / (r.x1 - r.x0);
+            }
+            this.areaFace[i] = area;
+        }
+        for (let i = 0; i < this.nx; i++) this.areaCell[i] = 0.5 * (this.areaFace[i] + this.areaFace[i + 1]);
 
         for (let i = 0; i < this.nx; i++) {
             const idx = i * this.nvar;
@@ -747,23 +787,28 @@ class EulerSolver {
      *     rho_t = -u rho_x - rho u_x        u_t = -u u_x - p_x / rho
      *     p_t   = -u p_x - rho a^2 u_x      alpha_t = -u alpha_x
      *
-     * and, for each phasic density, the same equation as rho.
+     * and, for each phasic density, the same equation as rho. With a varying
+     * cross-section A, u_x in the density and pressure equations becomes
+     * u_x + u A_x / A.
      */
     musclPredict(dt) {
         const nx = this.nx, np = this.nprim, M = this.numMaterials;
         const W = this.W, dW = this.dW, rc2 = this.rc2;
         const half = 0.5 * dt / this.dx;
         const lastAlpha = 3 + M;
+        const area = this.variableArea, AF = this.areaFace, AC = this.areaCell;
         for (let i = 1; i < nx - 1; i++) {
             const w = i * np;
             const rho = W[w], u = W[w + 1];
             const du = dW[w + 1], dp = dW[w + 2];
-            W[w] = rho - half * (u * dW[w] + rho * du);
+            // Velocity divergence, including the change of cross-section
+            const div = area ? du + u * (AF[i + 1] - AF[i]) / AC[i] : du;
+            W[w] = rho - half * (u * dW[w] + rho * div);
             W[w + 1] = u - half * (u * du + dp / rho);
-            W[w + 2] -= half * (u * dp + rc2[i] * du);
+            W[w + 2] -= half * (u * dp + rc2[i] * div);
             for (let k = 3; k < lastAlpha; k++) W[w + k] -= half * u * dW[w + k];
             for (let k = lastAlpha; k < np; k++) {
-                if (W[w + k] > 0) W[w + k] -= half * (u * dW[w + k] + W[w + k] * du);
+                if (W[w + k] > 0) W[w + k] -= half * (u * dW[w + k] + W[w + k] * div);
             }
         }
     }
@@ -823,6 +868,10 @@ class EulerSolver {
      * oscillations.
      */
     updateConservative(U, Uout, dt) {
+        if (this.variableArea) {
+            this.updateConservativeArea(U, Uout, dt);
+            return;
+        }
         const nvar = this.nvar;
         const lambda = dt / this.dx;
         const flux = this.flux;
@@ -854,6 +903,44 @@ class EulerSolver {
                 // Partial densities are conserved
                 for (let k = lastAlpha; k < nvar; k++) {
                     Uout[idx + k] = U[idx + k] - lambda * (flux[fR + k] - flux[fL + k]);
+                }
+            }
+        }
+    }
+
+    /**
+     * The same update for a tube of varying cross-section A(x):
+     *
+     *     d(A U)/dt + d(A F)/dx = [0, p dA/dx, 0]
+     *
+     * The wall pressure term uses the cell pressure, so gas at rest stays at
+     * rest across an area change. Volume fractions are advected with the
+     * area-weighted face velocities.
+     */
+    updateConservativeArea(U, Uout, dt) {
+        const nvar = this.nvar, M = this.numMaterials;
+        const flux = this.flux, AF = this.areaFace, AC = this.areaCell;
+        const lastAlpha = 3 + M;
+        const half = this.alphaAtHalfStep;   // MUSCL-Hancock: use predicted cell values
+
+        for (let i = 0; i < this.nx; i++) {
+            const idx = i * nvar, fL = idx, fR = idx + nvar;
+            const aL = AF[i], aR = AF[i + 1];
+            const lambda = dt / (this.dx * AC[i]);
+            const pCell = half ? this.W[i * this.nprim + 2] : this.pc[i];
+
+            Uout[idx] = U[idx] - lambda * (aR * flux[fR] - aL * flux[fL]);
+            Uout[idx + 1] = U[idx + 1] - lambda * (aR * flux[fR + 1] - aL * flux[fL + 1] - pCell * (aR - aL));
+            Uout[idx + 2] = U[idx + 2] - lambda * (aR * flux[fR + 2] - aL * flux[fL + 2]);
+
+            if (M > 0) {
+                const divU = aR * this.faceVelocity[i + 1] - aL * this.faceVelocity[i];
+                for (let k = 3; k < lastAlpha; k++) {
+                    const alpha = half ? this.W[i * this.nprim + k] : U[idx + k];
+                    Uout[idx + k] = U[idx + k] - lambda * (aR * flux[fR + k] - aL * flux[fL + k] - alpha * divU);
+                }
+                for (let k = lastAlpha; k < nvar; k++) {
+                    Uout[idx + k] = U[idx + k] - lambda * (aR * flux[fR + k] - aL * flux[fL + k]);
                 }
             }
         }
@@ -969,6 +1056,7 @@ class EulerSolver {
             T: Array.from(this.T),
             xtData: this.xtData,
             tracers: this.tracers,
+            area: Array.from(this.areaCell),
             timeSteps: this.timeSteps,
             wallTime: this.wallTime || 0,
             interfaceMethod: this.interfaceMethod

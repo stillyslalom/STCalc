@@ -368,3 +368,60 @@ test('Hancock with a first-order solver is Godunov\'s method', () => {
     const mixed = run(slabs, { finalTime: 0.002, integrator: 'Hancock', order: 1 });
     close(mean(mixed, 'p', 3.6, 3.9), exact.pStar, 0.01, 'p* (mixed)');
 });
+
+/* ---- Varying cross-section (quasi-one-dimensional flow) ---- */
+
+const aslab = (s, area) => ({ ...s, area });
+
+test('gas at rest stays at rest across area changes', () => {
+    const solver = run([aslab(slab(HELIUM, 2e5, 300, 3), 2.25), aslab(slab(HELIUM, 2e5, 300, 3), 1), aslab(slab(AIR, 2e5, 300, 2), 3)],
+        { finalTime: 0.004, nx: 320, ...hancock });   // slab boundaries fall on cell faces
+    assert.equal(solver.variableArea, true);
+    for (let i = 0; i < solver.nx; i++) {
+        assert.ok(Math.abs(solver.u[i]) < 1e-9, `u[${i}] = ${solver.u[i]}`);
+        close(solver.p[i], 2e5, 1e-12, `p[${i}]`);
+    }
+    // The transition lies inside the wider slab and ends at the slab boundary
+    close(solver.areaFace[0], 2.25, 1e-12, 'driver area');
+    close(solver.areaFace[Math.round(3 / solver.dx)], 1, 1e-12, 'area at the first boundary');
+    close(solver.areaFace[Math.round(6 / solver.dx)], 1, 1e-12, 'area at the second boundary');
+    close(solver.areaFace[solver.nx], 3, 1e-12, 'end area');
+});
+
+test('equal areas give exactly the constant-area result', () => {
+    const plain = run([slab(HELIUM, 4e5, 300, 3), slab(AIR, 101325, 300, 3)], { finalTime: 0.002, ...hancock });
+    const scaled = run([aslab(slab(HELIUM, 4e5, 300, 3), 5), aslab(slab(AIR, 101325, 300, 3), 5)], { finalTime: 0.002, ...hancock });
+    assert.equal(scaled.variableArea, false);
+    for (let i = 0; i < plain.nx; i++) assert.equal(scaled.p[i], plain.p[i]);
+});
+
+for (const [integrator, variable] of [['Hancock', false], ['Hancock', true], ['SSP', false]]) {
+    test(`area contraction reproduces the shock tube calculator (${integrator}, ${variable ? 'variable' : 'constant'} gamma)`, () => {
+        const air = variable ? { ...AIR, thermo: comp('1') } : AIR;
+        const he = variable ? { ...HELIUM, thermo: comp('4') } : HELIUM;
+        const areaRatio = 2.25;
+        const shock = lib.computeShockTube({ mach: 3, p1: 101325, t1: 300, t4: 300, driven: air, driver: he, areaRatio, variableGamma: variable });
+        const flat = lib.computeShockTube({ mach: 3, p1: 101325, t1: 300, t4: 300, driven: air, driver: he, variableGamma: variable });
+        assert.ok(shock.state4.p < 0.7 * flat.state4.p, 'the area ratio lowers the driver pressure substantially');
+
+        const tEnd = 3.2 / shock.shockSpeed;
+        const solver = run([
+            aslab(tslab(HELIUM, he.thermo || null, shock.state4.p, 300, 4), areaRatio),
+            aslab(tslab(AIR, air.thermo || null, 101325, 300, 5), 1)
+        ], { finalTime: tEnd, nx: 800, order: 2, integrator });
+
+        // Plateau just behind the shock
+        let xShock = 0;
+        for (let i = 0; i < solver.nx; i++) if (solver.p[i] > 0.5 * (101325 + shock.state2.p)) xShock = solver.x[i];
+        close(mean(solver, 'p', xShock - 0.4, xShock - 0.2), shock.state2.p, 0.005, 'p2');
+        close(mean(solver, 'u', xShock - 0.4, xShock - 0.2), shock.state2.u, 0.005, 'u2');
+
+        // Mass is conserved when weighted by the cross-section
+        const mass = s => { let m = 0; for (let i = 0; i < s.nx; i++) m += s.rho[i] * s.areaCell[i] * s.dx; return m; };
+        const initial = run([
+            aslab(tslab(HELIUM, he.thermo || null, shock.state4.p, 300, 4), areaRatio),
+            aslab(tslab(AIR, air.thermo || null, 101325, 300, 5), 1)
+        ], { finalTime: 1e-9, nx: 800, order: 2, integrator });
+        close(mass(solver), mass(initial), 1e-10, 'mass');
+    });
+}

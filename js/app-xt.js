@@ -27,7 +27,8 @@ function addXTSlab(config) {
         gas: c.gas || { gasId: '', mixture: [] },
         pressure: c.pressure || (previous ? previous.pressure : 101325),
         temperature: c.temperature || (previous ? previous.temperature : 300),
-        length: c.length || 1
+        length: c.length || 1,
+        area: c.area || (previous ? previous.area : 1)
     });
 }
 
@@ -59,10 +60,10 @@ function renderXTSlabs() {
         const n = index + 1;
         const select = el('select', { 'aria-label': 'Slab ' + n + ' gas' });
         const mixture = el('div', { class: 'mixture', hidden: true });
-        const numberField = function (label, value, onInput) {
+        const numberField = function (label, value, onInput, title) {
             const input = el('input', { type: 'number', step: 'any', inputMode: 'decimal', value: value });
             input.addEventListener('input', function () { onInput(input.value === '' ? NaN : Number(input.value)); });
-            return el('label', { class: 'slab-field' }, el('span', {}, label), input);
+            return el('label', { class: 'slab-field', title: title }, el('span', {}, label), input);
         };
 
         const node = el('div', { class: 'slab-item' },
@@ -73,7 +74,8 @@ function renderXTSlabs() {
                     function (v) { slab.pressure = Units.fromDisplay('pressure', v); }),
                 numberField('Temperature (' + Units.label('temperature') + ')', Units.inputText('temperature', slab.temperature),
                     function (v) { slab.temperature = Units.fromDisplay('temperature', v); }),
-                numberField('Length (m)', slab.length, function (v) { slab.length = v; })),
+                numberField('Length (m)', slab.length, function (v) { slab.length = v; }),
+                numberField('Area', slab.area, function (v) { slab.area = v; }, 'Tube cross-section over this slab, in any units; only ratios matter. A change is spread over a short transition inside the wider slab.')),
             el('div', { class: 'slab-actions' },
                 el('button', { type: 'button', class: 'secondary small', disabled: index === 0, 'aria-label': 'Move slab ' + n + ' toward the driver end', onclick: function () { move(index, -1); } }, '↑'),
                 el('button', { type: 'button', class: 'secondary small', disabled: index === xtSlabs.length - 1, 'aria-label': 'Move slab ' + n + ' toward the driven end', onclick: function () { move(index, 1); } }, '↓'),
@@ -107,8 +109,8 @@ function importShockIntoXT() {
         return false;
     }
     syncXTSlabGases();
-    const driver = { gas: driverPicker.getValue(), pressure: shock.state4.p, temperature: shock.state4.T, length: xtSlabs[0] ? xtSlabs[0].length : 3 };
-    const driven = { gas: drivenPicker.getValue(), pressure: shock.state1.p, temperature: shock.state1.T, length: xtSlabs[1] ? xtSlabs[1].length : 6 };
+    const driver = { gas: driverPicker.getValue(), pressure: shock.state4.p, temperature: shock.state4.T, length: xtSlabs[0] ? xtSlabs[0].length : 3, area: shock.areaRatio };
+    const driven = { gas: drivenPicker.getValue(), pressure: shock.state1.p, temperature: shock.state1.T, length: xtSlabs[1] ? xtSlabs[1].length : 6, area: 1 };
     const rest = xtSlabs.slice(2);
     xtSlabs = [];
     addXTSlab(driver);
@@ -156,10 +158,11 @@ function readXTConfiguration() {
         if (!(slab.pressure > 0)) throw new FieldError(inputs[0], 'Slab ' + n + ': pressure must be a positive number.');
         if (!(slab.temperature > 0)) throw new FieldError(inputs[1], 'Slab ' + n + ': temperature must be a positive number.');
         if (!(slab.length > 0)) throw new FieldError(inputs[2], 'Slab ' + n + ': length must be a positive number.');
+        if (!(slab.area > 0)) throw new FieldError(inputs[3], 'Slab ' + n + ': area must be a positive number.');
         return {
             gasId: props.name, gamma: props.gamma, mw: props.mw, pinf: props.pinf,
             thermo: variableGamma && !(props.pinf > 0) ? props.thermo : null,
-            pressure: slab.pressure, temperature: slab.temperature, length: slab.length
+            pressure: slab.pressure, temperature: slab.temperature, length: slab.length, area: slab.area
         };
     });
     const totalLength = slabs.reduce(function (sum, slab) { return sum + slab.length; }, 0);
@@ -476,7 +479,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (xtSlabs.length > 0) return;
         // Start from the shock tube calculation when there is one
         if (!(appState.shock && appState.shock.reachable && importShockIntoXT())) {
-            addXTSlab({ gas: { gasId: '4' }, pressure: 400000, temperature: 300, length: 3 });   // helium driver
+            addXTSlab({ gas: { gasId: '4' }, pressure: 400000, temperature: 300, length: 3, area: 1 });   // helium driver
             addXTSlab({ gas: { gasId: '1' }, pressure: 101325, temperature: 300, length: 6 });   // air driven
             renderXTSlabs();
         }
@@ -487,11 +490,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (byId('xt').open) initialize();
 
     byId('xtImportBtn').addEventListener('click', function () {
-        if (!importShockIntoXT()) return;
-        // The x-t solver has a constant cross-section
-        showXTMessage(appState.shock.areaRatio > 1
-            ? 'The x-t solver ignores the area ratio, so this driver pressure gives a weaker shock here.' : '',
-            'warning');
+        if (importShockIntoXT()) showXTMessage('');
     });
     byId('xtAddSlabBtn').addEventListener('click', function () {
         syncXTSlabGases();
