@@ -1,0 +1,8 @@
+{
+  "name": "stcalc",
+  "private": true,
+  "description": "Shock tube calculator",
+  "scripts": {
+    "test": "node --test"
+  }
+}

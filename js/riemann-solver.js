@@ -1,14 +1,19 @@
 /**
  * Exact Riemann Solver for compressible gas dynamics
- * Solves for interface conditions between two ideal gases with different properties
+ * Solves for interface conditions between two ideal or stiffened gases with different properties
  */
 
 /**
- * Solve the exact Riemann problem for two ideal gases
- * @param {Object} leftState - {p: pressure (Pa), T: temperature (K), u: velocity (m/s), gamma: ratio of specific heats, mw: molecular weight (g/mol)}
- * @param {Object} rightState - {p, T, u, gamma, mw}
- * @param {number} ru - Universal gas constant (J/mol-K), default 8314.51
- * @returns {Object} {pStar, uStar, leftPost, rightPost, waveConfig}
+ * Solve the exact Riemann problem for two stiffened gases.
+ *
+ * Each side obeys p + pinf = rho * R * T with a^2 = gamma * (p + pinf) / rho.
+ * Setting pinf = 0 (or omitting it) gives an ideal gas. All ideal-gas wave
+ * relations hold in terms of the shifted pressure p + pinf.
+ *
+ * @param {Object} leftState - {p: pressure (Pa), T: temperature (K), u: velocity (m/s), gamma, mw (g/mol), pinf (Pa, optional)}
+ * @param {Object} rightState - {p, T, u, gamma, mw, pinf}
+ * @param {number} ru - Universal gas constant (J/kmol-K), default 8314.51
+ * @returns {Object} {pStar, uStar, leftPost, rightPost, waveConfig, converged}
  *   - pStar: interface pressure (Pa)
  *   - uStar: interface velocity (m/s)
  *   - leftPost: {p, T, rho, u, a} post-wave state on left side
@@ -16,122 +21,91 @@
  *   - waveConfig: {left: 'shock'|'rarefaction', right: 'shock'|'rarefaction'}
  */
 function solveExactRiemann(leftState, rightState, ru = 8314.51) {
-    // Calculate gas constants
-    const RL = ru / leftState.mw;
-    const RR = ru / rightState.mw;
+    const side = function (state) {
+        const R = ru / state.mw;
+        const pinf = state.pinf || 0;
+        const pt = state.p + pinf;          // shifted pressure
+        return {
+            R, pinf, pt,
+            p: state.p,
+            T: state.T,
+            u: state.u || 0,
+            gamma: state.gamma,
+            rho: pt / (R * state.T),
+            a: Math.sqrt(state.gamma * R * state.T)
+        };
+    };
+    const L = side(leftState);
+    const R = side(rightState);
 
-    // Initial velocities (default to 0 if not provided)
-    const uL0 = leftState.u || 0;
-    const uR0 = rightState.u || 0;
+    // Lowest admissible pressure: both shifted pressures must stay positive
+    const pFloor = -Math.min(L.pinf, R.pinf);
+    const scale = Math.max(L.pt, R.pt);
 
-    // Initial densities
-    const rhoL = leftState.p / (RL * leftState.T);
-    const rhoR = rightState.p / (RR * rightState.T);
+    // f(p) = fL + fR + (uR - uL) is monotonically increasing and concave
+    const residual = function (p) {
+        return pressureFunction(p + L.pinf, L.pt, L.rho, L.a, L.gamma) +
+               pressureFunction(p + R.pinf, R.pt, R.rho, R.a, R.gamma) +
+               (R.u - L.u);
+    };
+    const slope = function (p) {
+        return pressureFunctionDerivative(p + L.pinf, L.pt, L.rho, L.a, L.gamma) +
+               pressureFunctionDerivative(p + R.pinf, R.pt, R.rho, R.a, R.gamma);
+    };
 
-    // Sound speeds
-    const aL = Math.sqrt(leftState.gamma * RL * leftState.T);
-    const aR = Math.sqrt(rightState.gamma * RR * rightState.T);
+    // Acoustic (linearised) initial guess, valid for any equation of state
+    const zL = L.rho * L.a, zR = R.rho * R.a;
+    let pStar = (zR * L.p + zL * R.p - zL * zR * (R.u - L.u)) / (zL + zR);
+    const pMin = pFloor + 1e-12 * scale;
+    if (!isFinite(pStar) || pStar <= pMin) pStar = pMin;
 
-    // Pressure ratio guess (use acoustic approximation)
-    const pRatio = leftState.p / rightState.p;
-    let pStar;
+    const maxIter = 200;
+    const tol = 1e-9 * (L.a + R.a);
+    let converged = false;
 
-    if (pRatio > 1) {
-        // Shock likely on right
-        pStar = Math.max(leftState.p, rightState.p);
-    } else {
-        // Shock likely on left
-        pStar = Math.min(leftState.p, rightState.p);
-    }
-
-    // Better initial guess using two-rarefaction approximation
-    const gamL = leftState.gamma;
-    const gamR = rightState.gamma;
-
-    // Account for initial velocity difference in guess
-    const duInit = uR0 - uL0;
-    const pGuess = Math.pow(
-        (aL + aR - 0.5 * (gamL - 1) * duInit) /
-        (aL / Math.pow(leftState.p, (gamL - 1) / (2 * gamL)) + aR / Math.pow(rightState.p, (gamR - 1) / (2 * gamR))),
-        (2 * gamL * gamR) / (gamL - 1 + gamR - 1)
-    );
-
-    if (!isNaN(pGuess) && pGuess > 0) {
-        pStar = pGuess;
-    }
-
-    // Newton-Raphson iteration to find p*
-    const maxIter = 100;
-    const tol = 1e-6;
-    let iter = 0;
-
-    while (iter < maxIter) {
-        // Calculate f(p*) and f'(p*) for both sides
-        const fL = pressureFunction(pStar, leftState.p, rhoL, aL, gamL);
-        const fR = pressureFunction(pStar, rightState.p, rhoR, aR, gamR);
-        const dfL = pressureFunctionDerivative(pStar, leftState.p, rhoL, aL, gamL);
-        const dfR = pressureFunctionDerivative(pStar, rightState.p, rhoR, aR, gamR);
-
-        // The condition is: f = fL + fR + (uR - uL) = 0
-        const f = fL + fR + (uR0 - uL0);
-        const df = dfL + dfR;
-
+    for (let iter = 0; iter < maxIter; iter++) {
+        const f = residual(pStar);
         if (Math.abs(f) < tol) {
+            converged = true;
             break;
         }
-
-        // Newton-Raphson update
-        const dp = -f / df;
-        pStar = pStar + dp;
-
-        // Ensure pressure stays positive
-        pStar = Math.max(pStar, 1e-6);
-
-        iter++;
+        let next = pStar - f / slope(pStar);
+        // Keep the iterate admissible; halve toward the floor if Newton overshoots
+        if (!(next > pMin)) next = 0.5 * (pStar + pMin);
+        if (Math.abs(next - pStar) <= 1e-14 * scale) {
+            pStar = next;
+            converged = true;
+            break;
+        }
+        pStar = next;
     }
 
-    if (iter >= maxIter) {
+    if (!converged) {
         console.warn('Riemann solver did not converge, using best estimate');
     }
 
-    // Calculate u* from p* (velocity in star region)
-    // From the Julia code: u_star = 0.5 * (u_L + u_R) + 0.5 * (f_R - f_L)
-    const fL = velocityFunction(pStar, leftState.p, rhoL, aL, gamL);
-    const fR = velocityFunction(pStar, rightState.p, rhoR, aR, gamR);
-    const uStar = 0.5 * (uL0 + uR0) + 0.5 * (fR - fL);
+    const fL = pressureFunction(pStar + L.pinf, L.pt, L.rho, L.a, L.gamma);
+    const fR = pressureFunction(pStar + R.pinf, R.pt, R.rho, R.a, R.gamma);
+    const uStar = 0.5 * (L.u + R.u) + 0.5 * (fR - fL);
 
-    // Determine wave configuration
     const waveConfig = {
-        left: pStar > leftState.p ? 'shock' : 'rarefaction',
-        right: pStar > rightState.p ? 'shock' : 'rarefaction'
+        left: pStar > L.p ? 'shock' : 'rarefaction',
+        right: pStar > R.p ? 'shock' : 'rarefaction'
     };
-
-    // Calculate post-wave states
-    const leftPost = calculatePostWaveState(
-        {p: leftState.p, rho: rhoL, u: uL0, a: aL, gamma: gamL, R: RL, T: leftState.T},
-        pStar,
-        uStar,
-        waveConfig.left
-    );
-
-    const rightPost = calculatePostWaveState(
-        {p: rightState.p, rho: rhoR, u: uR0, a: aR, gamma: gamR, R: RR, T: rightState.T},
-        pStar,
-        uStar,
-        waveConfig.right
-    );
 
     return {
         pStar,
         uStar,
-        leftPost,
-        rightPost,
-        waveConfig
+        leftPost: calculatePostWaveState(L, pStar, uStar, waveConfig.left),
+        rightPost: calculatePostWaveState(R, pStar, uStar, waveConfig.right),
+        waveConfig,
+        converged
     };
 }
 
 /**
- * Pressure function f(p) for Riemann solver
+ * Pressure function f(p) for Riemann solver: velocity change across the wave.
+ * p and p0 are shifted pressures (p + pinf).
  * @private
  */
 function pressureFunction(p, p0, rho0, a0, gamma) {
@@ -166,56 +140,29 @@ function pressureFunctionDerivative(p, p0, rho0, a0, gamma) {
 }
 
 /**
- * Calculate particle velocity as function of pressure
- * @private
- */
-function velocityFunction(p, p0, rho0, a0, gamma) {
-    if (p > p0) {
-        // Shock wave
-        const A = 2 / ((gamma + 1) * rho0);
-        const B = (gamma - 1) / (gamma + 1) * p0;
-        return (p - p0) * Math.sqrt(A / (p + B));
-    } else {
-        // Rarefaction wave
-        const exponent = (gamma - 1) / (2 * gamma);
-        return (2 * a0 / (gamma - 1)) * (Math.pow(p / p0, exponent) - 1);
-    }
-}
-
-/**
  * Calculate post-wave state (after shock or rarefaction)
  * @private
  */
 function calculatePostWaveState(initialState, pStar, uStar, waveType) {
-    const {p: p0, rho: rho0, a: a0, gamma, R, T: T0} = initialState;
-
-    let rho, T, a;
+    const {pt: pt0, rho: rho0, gamma, R, pinf} = initialState;
+    const ratio = (pStar + pinf) / pt0;     // shifted pressure ratio
+    let rho;
 
     if (waveType === 'shock') {
-        // Shock relations
-        const pRatio = pStar / p0;
         const gp = gamma + 1;
         const gm = gamma - 1;
-
-        rho = rho0 * (gp * pRatio + gm) / (gm * pRatio + gp);
-        T = pStar / (rho * R);
-        a = Math.sqrt(gamma * R * T);
+        rho = rho0 * (gp * ratio + gm) / (gm * ratio + gp);
     } else {
-        // Rarefaction relations (isentropic)
-        const pRatio = pStar / p0;
-        const exponent = (gamma - 1) / gamma;
-
-        rho = rho0 * Math.pow(pRatio, 1 / gamma);
-        T = T0 * Math.pow(pRatio, exponent);
-        a = Math.sqrt(gamma * R * T);
+        rho = rho0 * Math.pow(ratio, 1 / gamma);
     }
 
+    const T = (pStar + pinf) / (rho * R);
     return {
         p: pStar,
         rho,
         T,
         u: uStar,
-        a
+        a: Math.sqrt(gamma * R * T)
     };
 }
 
@@ -232,8 +179,8 @@ function calculateAtwoodNumber(rho1, rho2) {
 /**
  * Solve shocked-interface problem for RMI experiments
  * Scenario: shock propagates through light gas and impacts light/heavy interface
- * @param {Object} shockedLightState - State of light gas after shock passage {p, T, gamma, mw}
- * @param {Object} ambientHeavyState - Ambient state of heavy gas before shock arrival {p, T, gamma, mw}
+ * @param {Object} shockedLightState - State of light gas after shock passage {p, T, u, gamma, mw, pinf}
+ * @param {Object} ambientHeavyState - Ambient state of heavy gas before shock arrival {p, T, u, gamma, mw, pinf}
  * @param {number} ru - Universal gas constant, default 8314.51
  * @returns {Object} Interface conditions and Atwood number
  */
@@ -249,7 +196,8 @@ function solveShockedInterface(shockedLightState, ambientHeavyState, ru = 8314.5
         lightGasPost: solution.leftPost,
         heavyGasPost: solution.rightPost,
         atwoodNumber: A,
-        waveConfig: solution.waveConfig
+        waveConfig: solution.waveConfig,
+        converged: solution.converged
     };
 }
 

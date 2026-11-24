@@ -83,20 +83,18 @@ class TimeIntegrator {
         solver.t += solver.dt;
         solver.timeSteps++;
         
-        // Update primitive variables
-        solver.updatePrimitives();
-        
-        // Advect material fractions if using mixed-cell method
-        if (solver.interfaceMethod === 'mixed') {
-            solver.advectMaterialFractions(solver.dt);
-        }
-        
-        // Update Lagrangian tracers (used by sharp and ghost methods)
-        solver.updateTracers();
-        
-        // Update gas properties based on interface tracking method
+        // Refresh the equation of state for the new material distribution,
+        // then derive primitive variables from it
         solver.updateGasProperties();
-        
+        solver.updatePrimitives();
+
+        // Update Lagrangian tracers (drawn as interface trajectories)
+        solver.updateTracers();
+        if (solver.interfaceMethod !== 'mixed') {
+            // Sharp method: cell properties follow the tracers
+            solver.updateEOS(solver.U);
+        }
+
         // Store x-t data if we've hit the target time (within numerical tolerance)
         if (Math.abs(solver.t - solver.nextXTStore) < 1e-10 || solver.t > solver.nextXTStore) {
             solver.storeXTData();
@@ -146,7 +144,7 @@ class RK2Integrator extends TimeIntegrator {
         
         // Stage 2: compute flux from U*
         // Copy Uk to U temporarily for flux computation
-        const n = solver.nx * 3;
+        const n = solver.nx * solver.nvar;
         for (let i = 0; i < n; i++) {
             solver.Un[i] = solver.U[i];
             solver.U[i] = solver.Uk[i];
@@ -217,7 +215,7 @@ class SSPIntegrator extends TimeIntegrator {
         // Calculate time step with visualization synchronization
         solver.dt = this.calculateTimeStep(solver, maxWaveSpeed);
         
-        const n = solver.nx * 3;
+        const n = solver.nx * solver.nvar;
         
         // Save initial state in Un
         for (let i = 0; i < n; i++) {
@@ -280,4 +278,8 @@ class IntegratorFactory {
             { name: 'SSP', cfl: 0.8, description: '3rd-order Strong Stability Preserving' }
         ];
     }
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { TimeIntegrator, RK2Integrator, SSPIntegrator, IntegratorFactory };
 }
