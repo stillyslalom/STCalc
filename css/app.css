@@ -218,7 +218,9 @@ thead th { text-align: right; }
     padding: 5px 8px;
     margin-bottom: 4px;
     display: grid;
-    grid-template-columns: auto 1fr auto;
+    grid-template-columns: auto auto auto;
+    width: fit-content;
+    max-width: 100%;
     gap: 4px 10px;
     align-items: end;
 }
@@ -326,7 +328,7 @@ footer {
     .container { padding: 10px 12px; border-radius: 0; }
     .fields { grid-template-columns: max-content minmax(0, 1fr) minmax(1.5em, max-content); }
     .fields.compact { grid-template-columns: minmax(0, 1fr) max-content minmax(2.5em, max-content); }
-    .slab-item { grid-template-columns: minmax(0, 1fr); }
+    .slab-item { grid-template-columns: minmax(0, 1fr); width: auto; }
     .slab-item:not(:first-child) .slab-field > span { position: static; width: auto; height: auto; clip-path: none; }
     .slab-field, .slab-field select, .slab-field input { width: 100%; }
     .slab-controls { display: grid; grid-template-columns: 1fr 1fr 1fr; }
