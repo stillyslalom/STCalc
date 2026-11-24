@@ -6,12 +6,12 @@ Hosted at [https://stillyslalom.github.io/STCalc](https://stillyslalom.github.io
 
 ## What it does
 
-- **Shock tube**: incident and reflected shock states and the driver pressure for a desired Mach number, or the Mach number produced by a given driver pressure. Unreachable Mach numbers and results outside the constant-γ range produce warnings.
+- **Shock tube**: incident and reflected shock states and the driver pressure for a desired Mach number, or the Mach number produced by a given driver pressure. A driver-to-driven area ratio at the diaphragm is supported. Reports the tailoring ratio and the tailored Mach number. Unreachable Mach numbers and results outside the constant-γ range produce warnings.
 - **Gas models**: constant γ (matches the original calculator) or temperature-dependent specific heats from NASA polynomial fits, with frozen composition, in both the shock tube calculator and the x-t solver.
 - **Units**: pressure in Pa, kPa, MPa, bar, atm, psi or Torr and temperature in K, °C or °F, remembered by the browser.
 - **More gases, liquids and mixtures**: search about 1000 gases in the NASA CEA database and add them with one click, define your own, mix gases by mole fraction, and model liquids such as water with the stiffened-gas equation of state. Available in every gas list.
 - **Shocked interface (RMI)**: exact Riemann solution for the shock crossing an interface into a second gas or liquid, with Richtmyer–Meshkov growth estimates.
-- **x-t diagram**: in-browser 1D multicomponent Euler solver with pressure, density, temperature and velocity maps, probe traces, and CSV/JSON/HDF5 export. See [XT_DIAGRAM_README.md](XT_DIAGRAM_README.md).
+- **x-t diagram**: in-browser quasi-1D multicomponent Euler solver (second order, per-slab cross-section) with pressure, density, temperature and velocity maps, probe traces, test-time readouts, and CSV/JSON/HDF5 export. See [XT_DIAGRAM_README.md](XT_DIAGRAM_README.md).
 - **Timing** and **boost tank** helpers.
 - **Shareable links**: "Copy link to this setup" encodes the shock tube inputs, including custom gases, in the URL.
 

@@ -82,11 +82,8 @@ class TimeIntegrator {
         // Update time and step counter
         solver.t += solver.dt;
         solver.timeSteps++;
-        
-        // Refresh the equation of state for the new material distribution,
-        // then derive primitive variables from it
-        solver.updateGasProperties();
-        solver.updatePrimitives();
+
+        solver.clampFractions();
 
         // Update Lagrangian tracers (drawn as interface trajectories)
         solver.updateTracers();
@@ -97,6 +94,8 @@ class TimeIntegrator {
 
         // Store x-t data if we've hit the target time (within numerical tolerance)
         if (Math.abs(solver.t - solver.nextXTStore) < 1e-10 || solver.t > solver.nextXTStore) {
+            // Primitive variables are only needed for output
+            solver.refreshOutput();
             solver.storeXTData();
             solver.nextXTStore += solver.xtInterval;
         }
@@ -257,6 +256,49 @@ class SSPIntegrator extends TimeIntegrator {
 }
 
 /**
+ * MUSCL-Hancock scheme: second order in space and time with a single flux
+ * evaluation per step.
+ *
+ *   1. reconstruct limited slopes of the primitive variables;
+ *   2. advance the cell values half a step with those slopes (predictor);
+ *   3. solve one Riemann problem per face between the predicted face states;
+ *   4. update the conserved variables with the full step.
+ *
+ * With a first-order solver the slopes vanish and this is Godunov's method.
+ *
+ * Reference: Toro, "Riemann Solvers and Numerical Methods for Fluid
+ * Dynamics", section 14.4.
+ */
+class HancockIntegrator extends TimeIntegrator {
+    constructor() {
+        super('Hancock', 0.8);
+    }
+
+    getRequiredBuffers() {
+        return 1;
+    }
+
+    getBufferNames() {
+        return ['U'];
+    }
+
+    step(solver) {
+        if (solver.order === 2) {
+            solver.dt = this.calculateTimeStep(solver, solver.musclPrepare());
+            solver.musclPredict(solver.dt);
+            solver.alphaAtHalfStep = true;
+            solver.musclFluxes();
+        } else {
+            solver.dt = this.calculateTimeStep(solver, solver.computeFluxes());
+        }
+        solver.updateConservative(solver.U, solver.U, solver.dt);
+        solver.alphaAtHalfStep = false;
+        this.postStep(solver);
+        return solver.dt;
+    }
+}
+
+/**
  * Factory for creating time integrators
  */
 class IntegratorFactory {
@@ -266,6 +308,8 @@ class IntegratorFactory {
                 return new RK2Integrator();
             case 'SSP':
                 return new SSPIntegrator();
+            case 'Hancock':
+                return new HancockIntegrator();
             default:
                 console.warn(`Unknown integrator: ${name}, defaulting to RK2`);
                 return new RK2Integrator();
@@ -275,11 +319,12 @@ class IntegratorFactory {
     static getAvailable() {
         return [
             { name: 'RK2', cfl: 0.4, description: '2nd-order Runge-Kutta' },
-            { name: 'SSP', cfl: 0.8, description: '3rd-order Strong Stability Preserving' }
+            { name: 'SSP', cfl: 0.8, description: '3rd-order Strong Stability Preserving' },
+            { name: 'Hancock', cfl: 0.8, description: 'MUSCL-Hancock, one flux evaluation per step' }
         ];
     }
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { TimeIntegrator, RK2Integrator, SSPIntegrator, IntegratorFactory };
+    module.exports = { TimeIntegrator, RK2Integrator, SSPIntegrator, HancockIntegrator, IntegratorFactory };
 }

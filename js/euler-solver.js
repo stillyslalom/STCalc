@@ -12,6 +12,10 @@ class EulerSolver {
         // Interface tracking method: 'sharp' or 'mixed'
         this.interfaceMethod = config.interfaceMethod || 'sharp';
 
+        // Spatial order: 1 (piecewise constant) or 2 (MUSCL: limited linear
+        // reconstruction of primitive variables)
+        this.order = config.order === 2 ? 2 : 1;
+
         // Create time integrator instance
         this.integrator = IntegratorFactory.create(config.integrator || 'RK2');
 
@@ -52,6 +56,27 @@ class EulerSolver {
         // True when any material has a tabulated (temperature-dependent)
         // equation of state; partial densities are then carried per material
         this.tabulated = false;
+        this.alphaAtHalfStep = false;
+
+        // Start with a pre-formed shock rather than from bare jumps; see
+        // "Starting a run" below
+        this.exactStart = config.exactStart !== false;
+        this.formedShockCells = config.formedShockCells || 8;   // cells kept on either side of the settled shock
+        this.startTime = 0;
+        // Where no exact solution applies; see startFromFineGrid()
+        this.fineStartLevels = config.fineStartLevels === undefined ? 2 : config.fineStartLevels;
+        this.fineStartRatio = config.fineStartRatio || 4;
+
+        // Cross-sectional area (quasi-one-dimensional flow). Slabs may have
+        // different areas; each change is a linear transition of this length
+        // (m) inside the wider slab, ending at the slab boundary. By default
+        // 4% of the tube length, and never fewer than 8 cells: an abrupt step
+        // loses several percent of the shock strength numerically.
+        this.variableArea = false;
+        this.areaTransition = config.areaTransition;
+        this.areaFunction = config.areaFunction;
+        this.areaCell = null;
+        this.areaFace = null;
 
         // Face arrays
         this.flux = null;
@@ -86,7 +111,9 @@ class EulerSolver {
      * Initialize the shock tube with gas slabs
      * @param {Array} slabs - Array of {gasId, gamma, mw, pinf, pressure, temperature, length, velocity}.
      *   A slab may also carry thermo: a composition for makeThermo() (thermo.js);
-     *   its specific heats then depend on temperature.
+     *   its specific heats then depend on temperature. An optional area gives
+     *   the tube cross-section over the slab's initial extent (any units;
+     *   only ratios matter).
      */
     initialize(slabs) {
         const mixed = this.interfaceMethod === 'mixed';
@@ -112,11 +139,16 @@ class EulerSolver {
             materials[s].R = th.R;
             materials[s].mw = th.mw;
             materials[s].table = EulerSolver.energyTable(th);
+            materials[s].thermo = slab.thermo;
             this.tabulated = true;
         });
 
         this.materialProperties = materials;
         this.regions = materials;
+        // Flat copies for the inner loops
+        this.matG = Float64Array.from(materials, m => m.G);
+        this.matP = Float64Array.from(materials, m => m.P);
+        this.matR = Float64Array.from(materials, m => m.R);
         this.numMaterials = mixed ? slabs.length : 0;
         this.nvar = 3 + this.numMaterials * (this.tabulated ? 2 : 1);
 
@@ -125,6 +157,19 @@ class EulerSolver {
         this.Un = new Float64Array(n);
         this.Uk = new Float64Array(n);
         this.flux = new Float64Array((this.nx + 1) * this.nvar);
+        if (this.order === 2) {
+            // Primitive variables per cell and their limited slopes:
+            // [rho, u, p, alpha_0.., rho_0..] (phasic densities only when tabulated)
+            this.nprim = 3 + this.numMaterials * (this.tabulated ? 2 : 1);
+            this.W = new Float64Array(this.nx * this.nprim);
+            this.dW = new Float64Array(this.nx * this.nprim);
+            const face = () => ({
+                rho: 0, mom: 0, E: 0, p: 0, rc2: 0,
+                alpha: new Float64Array(this.numMaterials), mass: new Float64Array(this.numMaterials)
+            });
+            this.faceL = face();
+            this.faceR = face();
+        }
         if (mixed) {
             this.materialFractions = new Float64Array(this.nx * this.numMaterials);
         }
@@ -138,6 +183,35 @@ class EulerSolver {
         // Slab edges
         const edges = [0];
         for (const slab of slabs) edges.push(edges[edges.length - 1] + slab.length);
+
+        // Tube cross-section: constant over each slab's initial extent, with a
+        // linear ramp across each boundary where it changes
+        const areas = slabs.map(slab => slab.area > 0 ? slab.area : 1);
+        this.areaFace = new Float64Array(this.nx + 1);
+        this.areaCell = new Float64Array(this.nx);
+        const wanted = this.areaTransition > 0 ? this.areaTransition : 0.04 * totalLength;
+        const ramps = [];
+        for (let b = 1; b < slabs.length; b++) {
+            if (areas[b - 1] === areas[b]) continue;
+            const wider = areas[b - 1] > areas[b] ? b - 1 : b;
+            const width = Math.min(Math.max(wanted, 8 * this.dx), 0.5 * slabs[wider].length);
+            ramps.push(wider === b - 1
+                ? { x0: edges[b] - width, x1: edges[b], a0: areas[b - 1], a1: areas[b] }
+                : { x0: edges[b], x1: edges[b] + width, a0: areas[b - 1], a1: areas[b] });
+        }
+        // (A calculation covering part of another's tube is given that one's area.)
+        const areaAt = this.areaFunction || ((x) => {
+            let s = 0;
+            while (s < slabs.length - 1 && x >= edges[s + 1]) s++;
+            let area = areas[s];
+            for (const r of ramps) {
+                if (x >= r.x0 && x <= r.x1) area = r.a0 + (r.a1 - r.a0) * (x - r.x0) / (r.x1 - r.x0);
+            }
+            return area;
+        });
+        for (let i = 0; i <= this.nx; i++) this.areaFace[i] = areaAt(i * this.dx);
+        this.variableArea = this.areaFace.some(a => a !== this.areaFace[0]);
+        for (let i = 0; i < this.nx; i++) this.areaCell[i] = 0.5 * (this.areaFace[i] + this.areaFace[i + 1]);
 
         for (let i = 0; i < this.nx; i++) {
             const idx = i * this.nvar;
@@ -196,6 +270,558 @@ class EulerSolver {
         this.updateGasProperties();
         this.updatePrimitives();
         this.storeXTData();
+        this.nextXTStore = this.xtInterval;
+
+        // (The sharp method cannot represent the mixed cell at the moved contact.)
+        this.initialState = new Float64Array(this.U);
+        if (this.exactStart && mixed) {
+            const began = Date.now();
+            const start = this.startProblems(slabs);
+            if (start && this.startFromExactSolution(start, edges) === false && this.fineStartLevels > 0) {
+                this.startFromFineGrid(slabs, edges, start);
+            }
+            this.wallTime = (Date.now() - began) / 1000;
+        }
+    }
+
+    /*
+     * Starting a run
+     *
+     * A shock-capturing scheme cannot hold a perfectly sharp shock: in its
+     * first steps the jump spreads into a profile two or three cells wide, and
+     * the difference is radiated backward as an acoustic pulse (a "start-up
+     * error"). In a shock tube that pulse crosses the contact surface into
+     * the driver gas, where it moves at the speed of the expansion's tail and
+     * stays beside it as a dip of a few percent in pressure.
+     *
+     * To avoid it the run starts at a time t0 > 0 from a state in which the
+     * strongest shock already has the scheme's own settled profile, taken
+     * from a short side calculation of that shock alone, and everything else
+     * is resolved more finely than the grid:
+     *
+     * - startFromExactSolution: constant-gamma and stiffened materials in a
+     *   tube of constant area. The state at t0 is the exact solution of each
+     *   slab boundary's Riemann problem.
+     * - startFromFineGrid: otherwise (temperature-dependent gases, an area
+     *   change beside the boundary). The state at t0 is computed on a grid
+     *   several times finer, itself started the same way.
+     *
+     * Snapshots before t0 come from the same source. If neither applies (no
+     * shock into gas at rest, or its pattern would reach a wall or another
+     * boundary before the shock is clear of the contact) the slabs are left
+     * as plain jumps.
+     */
+
+    /**
+     * The Riemann problem at every slab boundary with a pressure or velocity
+     * jump, and the strongest shock running into gas at rest. For
+     * temperature-dependent gases these are constant-gamma estimates.
+     * @returns {{problems: Array, shock: Object, maxSpeed: number}|null}
+     */
+    startProblems(slabs) {
+        const mats = this.materialProperties;
+        const dx = this.dx;
+        const side = (s) => ({
+            p: slabs[s].pressure, T: slabs[s].temperature, u: slabs[s].velocity || 0,
+            gamma: mats[s].gamma, mw: this.Ru / mats[s].R, pinf: mats[s].pinf
+        });
+
+        // Solve every boundary with a pressure or velocity jump
+        const problems = [];
+        let maxSpeed = 0;
+        for (let s = 0; s < slabs.length; s++) {
+            const st = side(s);
+            maxSpeed = Math.max(maxSpeed, Math.abs(st.u) + Math.sqrt(st.gamma * mats[s].R * st.T));
+        }
+        for (let b = 1; b < slabs.length; b++) {
+            const L = side(b - 1), R = side(b);
+            if (Math.abs(L.p - R.p) <= 1e-9 * Math.abs(L.p) && Math.abs(L.u - R.u) < 1e-9) continue;
+            const sol = solveExactRiemann(L, R, this.Ru);
+            if (!sol.converged) continue;
+            const leftRatio = (sol.pStar + sol.left.pinf) / sol.left.pt, rightRatio = (sol.pStar + sol.right.pinf) / sol.right.pt;
+            const speed = (s, ratio) => ratio > 1
+                ? s.a * Math.sqrt((s.gamma + 1) / (2 * s.gamma) * ratio + (s.gamma - 1) / (2 * s.gamma)) : s.a;
+            const vLeft = sol.left.u - speed(sol.left, leftRatio), vRight = sol.right.u + speed(sol.right, rightRatio);
+            // Rays where the solution has a jump or a kink; cell averages are integrated piecewise between them
+            const rays = [vLeft, vRight, sol.uStar];
+            if (leftRatio <= 1) rays.push(sol.leftPost.u - sol.leftPost.a);
+            if (rightRatio <= 1) rays.push(sol.rightPost.u + sol.rightPost.a);
+            problems.push({
+                b: b, sol: sol, vLeft: vLeft, vRight: vRight, leftRatio: leftRatio, rightRatio: rightRatio,
+                rays: rays.sort((x, y) => x - y)
+            });
+            maxSpeed = Math.max(maxSpeed, Math.abs(vLeft), Math.abs(vRight),
+                Math.abs(sol.uStar) + sol.leftPost.a, Math.abs(sol.uStar) + sol.rightPost.a);
+        }
+        // The strongest shock, if it runs into gas at rest, is the one installed pre-formed
+        let shock = null;
+        for (const q of problems) {
+            const candidates = [
+                { q: q, dir: -1, ratio: q.leftRatio, v: q.vLeft, pre: q.sol.left, post: q.sol.leftPost, material: q.b - 1 },
+                { q: q, dir: 1, ratio: q.rightRatio, v: q.vRight, pre: q.sol.right, post: q.sol.rightPost, material: q.b }
+            ];
+            for (const c of candidates) {
+                if (c.ratio > 1.05 && Math.abs(c.pre.u) < 1e-12 && (!shock || c.ratio > shock.ratio)) shock = c;
+            }
+        }
+
+        return shock ? { problems: problems, shock: shock, maxSpeed: maxSpeed } : null;
+    }
+
+    /**
+     * Start from the exact solution of the Riemann problems found by
+     * startProblems(): constant-gamma and stiffened materials away from area
+     * changes. See initialize().
+     * @returns {boolean|null} whether the start was applied; null if the
+     *   shock has no settled profile to install, so that no start would help
+     */
+    startFromExactSolution(start, edges) {
+        if (this.tabulated) return false;
+        const { problems, shock, maxSpeed } = start;
+        const dx = this.dx;
+
+        // A pattern is usable at time t if it stays inside its two slabs, clear of walls and area changes
+        const margin = 2 * dx;
+        const fits = (q, t) => {
+            const x0 = edges[q.b], xa = x0 + q.vLeft * t, xb = x0 + q.vRight * t;
+            if (xa - margin < edges[q.b - 1] || xb + margin > edges[q.b + 1]) return false;
+            const first = Math.max(0, Math.floor(xa / dx) - 1), last = Math.min(this.nx - 1, Math.floor(xb / dx) + 1);
+            for (let i = first; i <= last + 1; i++) if (this.areaFace[i] !== this.areaFace[first]) return false;
+            return true;
+        };
+
+
+        // The settled shock profile, from a side calculation with the same time step.
+        // Without it an exact start does not help, so the plain jumps are kept.
+        const m = this.formedShockCells;
+        const formed = this.formedShockProfile(shock, this.cfl * dx / maxSpeed, m);
+        if (!formed) return null;
+        const profile = formed.cells;
+
+        // Start once the shock is clear of the contact: a few cells of shocked
+        // gas behind the shock come from the profile, with two more up to the
+        // contact. Fewer cells when the shocked gas is slow to open up (a
+        // heavy driven gas) or the run is short. A settled numerical shock
+        // holds the mass of an exact shock slightly displaced from the cell
+        // face (shift cells ahead), so t0 puts the exact shock there and the
+        // installed profile conserves mass.
+        const x0 = edges[shock.q.b];
+        const speed = Math.abs(shock.v);
+        // Distance from the boundary to cell faces, measured along the shock's direction of travel
+        const offset = shock.dir > 0 ? Math.ceil(x0 / dx - 1e-9) * dx - x0 : x0 - Math.floor(x0 / dx + 1e-9) * dx;
+        let mb = 0, t0 = 0, facesAhead = 0;
+        for (let behind = Math.min(3, m); behind >= 1 && !mb; behind--) {
+            let excess = 0;
+            for (let k = m - behind; k < 2 * m; k++) excess += profile[k][0] - (k < m ? shock.post.rho : shock.pre.rho);
+            const shift = excess / (shock.post.rho - shock.pre.rho);
+            const tMin = (behind + 2) * dx / Math.abs(shock.v - shock.q.sol.uStar);
+            const faces = Math.max(1, Math.ceil((speed * tMin - offset) / dx - shift));
+            const t = (offset + (faces + shift) * dx) / speed;
+            const limit = (behind > 1 ? 0.25 : 0.9) * this.finalTime;
+            if (t > 0 && t <= limit && problems.every(q => fits(q, t))) {
+                mb = behind;
+                t0 = t;
+                facesAhead = faces;
+            }
+        }
+        if (!mb) return false;
+        const shockFace = shock.dir > 0
+            ? Math.round((x0 + offset) / dx) + facesAhead
+            : Math.round((x0 - offset) / dx) - facesAhead;
+        const active = problems;
+
+        // Snapshots before t0 come straight from the exact solution
+        const initial = this.initialState;
+        const setTime = (t) => {
+            this.U.set(initial);
+            for (const q of active) {
+                this.fillExact(q, edges[q.b], t);
+                const tracer = this.tracers[q.b - 1];
+                tracer.x = edges[q.b] + q.sol.uStar * t;
+                tracer.trajectory.push({ t: t, x: tracer.x, v: q.sol.uStar });
+            }
+            this.t = t;
+        };
+        while (this.nextXTStore < t0 - 1e-12) {
+            setTime(this.nextXTStore);
+            this.refreshOutput();
+            this.storeXTData();
+            this.nextXTStore += this.xtInterval;
+        }
+        setTime(t0);
+
+        {
+            const nvar = this.nvar, M = this.numMaterials;
+            for (let k = m - mb; k < 2 * m; k++) {
+                // The side calculation has the shock running in +x; mirror it for a left-running shock
+                const cell = shock.dir > 0 ? shockFace - m + k : shockFace + m - 1 - k;
+                const idx = cell * nvar, v = profile[k];
+                this.U[idx] = v[0];
+                this.U[idx + 1] = shock.dir * v[1];
+                this.U[idx + 2] = v[2];
+                for (let j = 0; j < M; j++) this.U[idx + 3 + j] = j === shock.material ? 1 : 0;
+            }
+        }
+
+        this.startTime = t0;
+        this.updateGasProperties();
+        return true;
+    }
+
+    /**
+     * Start from a calculation on a grid `fineStartRatio` times finer.
+     *
+     * The finer calculation has its own start-up error, but that pulse is as
+     * many times narrower, and so as many times weaker once averaged onto
+     * this grid; it is in turn started from a still finer one
+     * (fineStartLevels deep). It runs until its shock has reached a chosen
+     * cell face, clear of the contact; its state is then averaged onto this
+     * grid and the shock, which would otherwise be sharp here, is replaced by
+     * this grid's settled profile. The hand-over time is the moment the
+     * finer calculation holds exactly the profile's mass in those cells.
+     * @returns {boolean} whether the start was applied
+     */
+    startFromFineGrid(slabs, edges, start) {
+        const shock = start.shock, dir = shock.dir, b = shock.q.b;
+        const m = this.formedShockCells, r = this.fineStartRatio;
+        const dx = this.dx, nx = this.nx, nvar = this.nvar, M = this.numMaterials;
+        const mat = this.materialProperties[shock.material];
+
+        // The face where the shock is handed over: far enough for mb cells of
+        // shocked gas and a few more up to the (smeared) contact, and past
+        // any area change. Fewer cells when the shocked gas is slow to open
+        // up (a heavy driven gas) or the run is short.
+        const separation = Math.abs(shock.v - shock.q.sol.uStar), speed = Math.abs(shock.v);
+        const x0 = edges[b];
+        const boundaryFace = dir > 0 ? Math.ceil(x0 / dx - 1e-9) : Math.floor(x0 / dx + 1e-9);
+        const slabEnd = dir > 0 ? Math.min(nx, Math.floor(edges[b + 1] / dx + 1e-9)) : Math.max(0, Math.ceil(edges[b - 1] / dx - 1e-9));
+        const room = (f) => dir * (slabEnd - f) >= m + 3;
+        let mb = 0, face = 0, expected = 0;
+        const uniform = (f, behind) => {
+            for (let i = f - dir * (behind + 1); i !== f + dir * (m + 3); i += dir) {
+                if (this.areaFace[i] !== this.areaFace[f]) return false;
+            }
+            return true;
+        };
+        for (const [behind, gap, limit] of [[2, 5, 0.25], [1, 3, 0.8]]) {
+            let f = boundaryFace + dir * Math.ceil((behind + gap) * speed / separation);
+            while (room(f) && !uniform(f, behind)) f += dir;
+            const time = Math.abs(f - boundaryFace) * dx / speed;
+            if (room(f) && time <= limit * this.finalTime) {
+                mb = Math.min(behind, m);
+                face = f;
+                expected = time;
+                break;
+            }
+        }
+        if (!mb) return false;
+        // Nothing to gain unless a shock of about this strength has a settled profile
+        const estimate = this.shockedState(mat, shock.pre, shock.q.sol.pStar);
+        if (!estimate || !this.formedShockProfile(
+            { material: shock.material, pre: shock.pre, post: estimate, v: estimate.speed }, this.cfl * dx / start.maxSpeed, m)) return false;
+        // (with allowance for handing over a few cells later; see below)
+        const timeLimit = Math.min(1.4 * (expected + 6 * dx / speed), 0.95 * this.finalTime);
+        // Profile cell k (0 .. 2m-1, shock running toward larger k) on this grid
+        const cellOf = (k) => dir > 0 ? face - m + k : face + m - 1 - k;
+
+        // The fine grid need only cover what the waves can reach by then. (A
+        // second boundary with a jump has to start at the same time, so the
+        // whole tube is covered.)
+        let c0 = 0, c1 = nx;
+        if (start.problems.length === 1 && slabs.every(slab => !slab.velocity)) {
+            const reach = Math.ceil(1.6 * start.maxSpeed * timeLimit / dx) + 4;
+            c0 = Math.max(0, Math.floor(x0 / dx) - reach);
+            c1 = Math.min(nx, Math.ceil(x0 / dx) + reach);
+        }
+        const xa = c0 * dx, xb = c1 * dx;
+        const pieces = [], source = [];
+        slabs.forEach((slab, s) => {
+            const length = Math.min(xb, edges[s + 1]) - Math.max(xa, edges[s]);
+            if (length > 1e-6 * dx) {
+                pieces.push(Object.assign({}, slab, { length: length }));
+                source.push(s);
+            }
+        });
+        // The same tube as on this grid: linear between this grid's faces
+        const fineArea = (x) => {
+            const position = (x + xa) / dx;
+            const i = Math.min(nx - 1, Math.max(0, Math.floor(position)));
+            return this.areaFace[i] + (this.areaFace[i + 1] - this.areaFace[i]) * (position - i);
+        };
+        const child = new EulerSolver({
+            nx: (c1 - c0) * r, cfl: this.cfl, order: this.order, integrator: this.integrator.name,
+            interfaceMethod: 'mixed', finalTime: this.finalTime, xtInterval: this.xtInterval,
+            areaFunction: this.variableArea ? fineArea : undefined, formedShockCells: m,
+            fineStartLevels: this.fineStartLevels - 1, fineStartRatio: r
+        });
+        child.initialize(pieces);
+        // This grid's variables in the fine grid's layout (-1: a material it does not hold)
+        const cn = child.nvar, Mc = pieces.length;
+        const childVar = [0, 1, 2];
+        for (let part = 0; part < (this.tabulated ? 2 : 1); part++) {
+            for (let j = 0; j < M; j++) childVar.push(source.indexOf(j) < 0 ? -1 : 3 + part * Mc + source.indexOf(j));
+        }
+        // One of this grid's variables in one of its cells, from the fine
+        // cells there, weighted by cross-section
+        const mean = (cell, v, from) => {
+            if (childVar[v] < 0) return 0;
+            let sum = 0, weight = 0;
+            for (let j = 0; j < r; j++) {
+                const f = (cell - c0) * r + j;
+                sum += (from || child.U)[f * cn + childVar[v]] * child.areaCell[f];
+                weight += child.areaCell[f];
+            }
+            return sum / weight;
+        };
+        const step = () => {
+            if (child.t > timeLimit) return false;
+            child.integrator.step(child);
+            return child.dt > 0 && isFinite(child.dt);
+        };
+
+        const pre = shock.pre;
+        const arrived = pre.rho + 0.02 * (shock.post.rho - pre.rho);
+        let deviation = null;
+        for (let attempt = 0; !deviation; attempt++) {
+            // Run until the shock comes within two cells of the face, then read
+            // the pressure behind it; the rest of the post-shock state follows
+            // from the jump conditions
+            while (mean(cellOf(m - 2), 0) < arrived) if (!step()) return false;
+            child.refreshOutput();
+            let p2 = 0;
+            for (let j = 0; j < r; j++) p2 += child.p[(cellOf(m - 4) - c0) * r + j] / r;
+            const post = this.shockedState(mat, pre, p2);
+            if (!post) return false;
+            const formed = this.formedShockProfile(
+                { material: shock.material, pre: pre, post: post, v: post.speed }, this.cfl * dx / start.maxSpeed, m);
+            if (!formed) return false;
+
+            // What the settled profile adds to a sharp shock holding the same
+            // mass: `shift` cells ahead of the face, in the cells used
+            const profile = formed.cells, jump = formed.post[0] - formed.pre[0];
+            let excess = 0;
+            for (let k = m - mb; k < 2 * m; k++) excess += profile[k][0] - (k < m ? formed.post[0] : formed.pre[0]);
+            const shift = excess / jump;
+            if (!(Math.abs(shift) < 0.9)) return false;
+            const change = (k, v) => {
+                const behind = k < m - 1 ? 1 : k === m - 1 ? 1 + Math.min(shift, 0) : k === m ? Math.max(shift, 0) : 0;
+                return profile[k][v] - (behind * formed.post[v] + (1 - behind) * formed.pre[v]);
+            };
+
+            // Continue until the fine grid's shock is at that position: the two
+            // cells beside the face then hold the sharp shock's mass
+            const target = (1 + shift) * formed.post[0] + (1 - shift) * formed.pre[0];
+            const inflowCell = dir > 0 ? (cellOf(m - 1) - c0) * r - 1 : (cellOf(m - 1) - c0 + 1) * r;
+            const far = child.finalTime;
+            for (let tries = 0; ; tries++) {
+                const missing = (target - mean(cellOf(m - 1), 0) - mean(cellOf(m), 0)) * dx;
+                // (within a thousandth of a cell if the last step overshot)
+                if (missing <= 1e-7 * target * dx && missing > -1e-3 * jump * dx) break;
+                // Mass arrives at the rate behind the shock, once the shock is inside these cells
+                const inflow = Math.max(dir * child.U[inflowCell * cn + 1], formed.post[1]);
+                if (missing < 0 || tries > 1000) return false;
+                child.finalTime = child.t + missing / inflow;   // the step is cut short if the mass would overshoot
+                const ok = step();
+                child.finalTime = far;
+                if (!ok) return false;
+            }
+
+            // The profile's cells must be clear of the contact; if they are
+            // not, hand over two cells further on
+            let clear = true;
+            for (let k = m - mb; k < 2 * m; k++) {
+                if (mean(cellOf(k), 3 + shock.material) < 0.99) clear = false;
+            }
+            if (clear) {
+                deviation = change;
+                break;
+            }
+            face += 2 * dir;
+            if (attempt >= 2 || !room(face) || !uniform(face, mb)) return false;
+        }
+        const t0 = child.t;
+        // The ends of a partial grid must be undisturbed
+        const still = (cell) => Math.abs(child.U[cell * cn + 1]) <= 1e-7 * child.U[cell * cn] * start.maxSpeed;
+        if ((c0 > 0 && !still(1)) || (c1 < nx && !still(child.nx - 2))) return false;
+
+        // Adopt the fine state: cell averages, interface positions and earlier snapshots
+        // (Conserved variables take the fine grid's change since t = 0, so
+        // that their totals on this grid stay exactly what they were.)
+        for (let i = c0; i < c1; i++) {
+            for (let v = 0; v < nvar; v++) {
+                if (v >= 3 && v < 3 + M) this.U[i * nvar + v] = mean(i, v);
+                else this.U[i * nvar + v] += mean(i, v) - mean(i, v, child.initialState);
+            }
+            let pc = 0;
+            for (let j = 0; j < r; j++) pc += child.pc[(i - c0) * r + j] / r;
+            this.pc[i] = pc;
+        }
+        for (let k = m - mb; k < 2 * m; k++) {
+            const idx = cellOf(k) * nvar;
+            this.U[idx] += deviation(k, 0);
+            this.U[idx + 1] += dir * deviation(k, 1);
+            this.U[idx + 2] += deviation(k, 2);
+            if (this.tabulated) this.U[idx + 3 + M + shock.material] += deviation(k, 0);
+        }
+        child.tracers.forEach((tracer, j) => {
+            const mine = this.tracers[source[j + 1] - 1];
+            mine.x = tracer.x + xa;
+            mine.trajectory = tracer.trajectory.map(point => ({ t: point.t, x: point.x + xa, v: point.v }));
+        });
+        const first = this.xtData[0];
+        for (const snap of child.xtData) {
+            if (!(snap.t > 0) || snap.t >= t0 - 1e-12) continue;
+            const copy = Object.assign({}, first, { t: snap.t, gasId: first.gasId.slice() });
+            for (const key of ['rho', 'u', 'p', 'T', 'gamma', 'pinf', 'mw']) {
+                copy[key] = new Float64Array(first[key]);
+                for (let i = c0; i < c1; i++) {
+                    let sum = 0;
+                    for (let j = 0; j < r; j++) sum += snap[key][(i - c0) * r + j];
+                    copy[key][i] = sum / r;
+                }
+            }
+            copy.materialFractions = new Float64Array(first.materialFractions);
+            for (let i = c0; i < c1; i++) {
+                copy.gasId[i] = snap.gasId[(i - c0) * r + (r >> 1)];
+                for (let j = 0; j < M; j++) {
+                    const from = source.indexOf(j);
+                    let sum = 0;
+                    for (let q = 0; from >= 0 && q < r; q++) sum += snap.materialFractions[((i - c0) * r + q) * Mc + from];
+                    copy.materialFractions[i * M + j] = sum / r;
+                }
+            }
+            this.xtData.push(copy);
+        }
+        this.t = t0;
+        this.startTime = t0;
+        this.nextXTStore = this.xtInterval * Math.ceil(t0 / this.xtInterval - 1e-9);
+        this.updateGasProperties();
+        return true;
+    }
+
+    /**
+     * State behind a shock of given post-shock pressure running into gas at
+     * rest (Rankine-Hugoniot), for a stiffened or a tabulated material.
+     * @returns {{p, T, rho, u, a, speed}|null} u and speed are magnitudes
+     */
+    shockedState(mat, pre, p2) {
+        const p1 = pre.p, v1 = 1 / pre.rho, pinf = mat.pinf;
+        if (!(p2 > p1)) return null;
+        let T2, rho2, a2;
+        if (mat.table) {
+            // e(T2) - e(T1) = (p1 + p2)/2 * (v1 - R*T2/p2), increasing in T2
+            const e1 = EulerSolver.tableEnergy(mat.table, pre.T);
+            const residual = (T) => EulerSolver.tableEnergy(mat.table, T) - e1 - 0.5 * (p1 + p2) * (v1 - mat.R * T / p2);
+            let lo = pre.T, hi = pre.T * p2 / p1;
+            for (let i = 0; i < 200 && hi - lo > 1e-12 * hi; i++) {
+                const mid = 0.5 * (lo + hi);
+                if (residual(mid) > 0) hi = mid; else lo = mid;
+            }
+            T2 = 0.5 * (lo + hi);
+            rho2 = p2 / (mat.R * T2);
+            a2 = Math.sqrt((1 + mat.R / EulerSolver.tableCv(mat.table, T2)) * mat.R * T2);
+        } else {
+            const g = mat.gamma, ratio = (p2 + pinf) / (p1 + pinf);
+            rho2 = pre.rho * ((g + 1) * ratio + (g - 1)) / ((g - 1) * ratio + (g + 1));
+            T2 = (p2 + pinf) / (rho2 * mat.R);
+            a2 = Math.sqrt(g * (p2 + pinf) / rho2);
+        }
+        if (!(rho2 > pre.rho)) return null;
+        const flux = Math.sqrt((p2 - p1) / (v1 - 1 / rho2));   // mass flux through the shock
+        const speed = flux * v1;
+        return { p: p2, T: T2, rho: rho2, u: speed * (1 - pre.rho / rho2), a: a2, speed: speed };
+    }
+
+    /**
+     * Cell averages of an exact Riemann solution at time t, written into U
+     * over the extent of its wave pattern. Simpson's rule on each smooth
+     * piece, so that mass, momentum and energy are conserved.
+     */
+    fillExact(q, x0, t) {
+        const mats = this.materialProperties, M = this.numMaterials, nvar = this.nvar, dx = this.dx;
+        const mL = mats[q.b - 1], mR = mats[q.b];
+        const first = Math.max(0, Math.floor((x0 + q.vLeft * t) / dx) - 1);
+        const last = Math.min(this.nx - 1, Math.floor((x0 + q.vRight * t) / dx) + 1);
+        const breaks = q.rays.map(v => x0 + v * t);
+        for (let i = first; i <= last; i++) {
+            const idx = i * nvar;
+            const cellLeft = i * dx, cellRight = cellLeft + dx;
+            const cuts = [cellLeft];
+            for (const x of breaks) if (x > cellLeft && x < cellRight) cuts.push(x);
+            cuts.push(cellRight);
+            let rho = 0, mom = 0, energy = 0, volL = 0;
+            for (let c = 0; c + 1 < cuts.length; c++) {
+                const a = cuts[c], width = cuts[c + 1] - a, n = 8;
+                for (let k = 0; k <= n; k++) {
+                    const weight = (k === 0 || k === n ? 1 : (k % 2 ? 4 : 2)) * width / (3 * n);
+                    // Nudge the end points inside the piece so they sample its own side of a jump
+                    const x = a + width * Math.min(Math.max(k / n, 1e-9), 1 - 1e-9);
+                    const st = sampleExactRiemann(q.sol, (x - x0) / t);
+                    const mat = st.side === 0 ? mL : mR;
+                    rho += weight * st.rho;
+                    mom += weight * st.rho * st.u;
+                    energy += weight * (mat.G * st.p + mat.P + 0.5 * st.rho * st.u * st.u);
+                    if (st.side === 0) volL += weight;
+                }
+            }
+            const inv = 1 / dx;
+            this.U[idx] = rho * inv;
+            this.U[idx + 1] = mom * inv;
+            this.U[idx + 2] = energy * inv;
+            for (let j = 0; j < M; j++) this.U[idx + 3 + j] = 0;
+            this.U[idx + 3 + q.b - 1] = volL * inv;
+            this.U[idx + 3 + q.b] = 1 - volL * inv;
+            this.pc[i] = sampleExactRiemann(q.sol, ((i + 0.5) * dx - x0) / t).p;
+        }
+    }
+
+    /**
+     * The numerical profile this scheme gives a shock once it has settled:
+     * run the shock alone, from a sharp jump on a cell face, until it has
+     * crossed a whole number of cells and its start-up pulse has left, then
+     * return the conserved variables of the m cells on either side of it.
+     * @returns {{cells: Array, post: Array, pre: Array}|null} [rho, rho*u, E]
+     *   for 2m cells, shock running in +x, and for the uniform states behind
+     *   and ahead; null if the side calculation is not clean.
+     */
+    formedShockProfile(shock, dt, m) {
+        const mat = this.materialProperties[shock.material];
+        // Far enough that the side calculation's own start-up traces are well behind the window
+        const dx = this.dx, travel = this.formedShockTravel || 120;
+        const speed = Math.abs(shock.v);                       // shock speed into gas at rest
+        const uPost = Math.abs(shock.post.u), signal = uPost + shock.post.a;
+        // Room behind the shock so the expansion from the side calculation's wall cannot reach the window
+        const behind = Math.ceil(travel * (signal / speed - 1)) + m + 14;
+        const ahead = travel + m + 6;
+        const slab = (state, cells, velocity) => ({
+            gasId: mat.gasId, gamma: mat.gamma, mw: this.Ru / mat.R, pinf: mat.pinf,
+            pressure: state.p, temperature: state.T, length: cells * dx, velocity: velocity, thermo: mat.thermo
+        });
+        // Equal time steps as close as possible to the main run's, ending exactly
+        // when the shock has crossed `travel` cells
+        const duration = travel * dx / speed;
+        const steps = Math.max(1, Math.round(duration / dt));
+        const aux = new EulerSolver({
+            nx: behind + ahead, cfl: Math.min(0.9, (duration / steps) * signal / dx), order: this.order,
+            integrator: this.integrator.name, interfaceMethod: 'mixed',
+            finalTime: duration, xtInterval: 10 * duration, exactStart: false
+        });
+        aux.initialize([slab(shock.post, behind, uPost), slab(shock.pre, ahead, 0)]);
+        const initial = new Float64Array(aux.U);
+        aux.nextXTStore = Infinity;   // no snapshots, so no time-step adjustments
+        aux.run();
+
+        const face = behind + travel;
+        const profile = [];
+        for (let k = -m; k < m; k++) {
+            const c = (face + k) * aux.nvar;
+            profile.push([aux.U[c], aux.U[c + 1], aux.U[c + 2]]);
+        }
+        // The window must begin in settled post-shock gas and end in undisturbed gas
+        const settled = Math.abs(profile[0][0] / shock.post.rho - 1) < 0.02 && Math.abs(profile[2 * m - 1][0] / shock.pre.rho - 1) < 1e-4;
+        if (!settled) return null;
+        const state = (cell) => Array.from(initial.subarray(cell * aux.nvar, cell * aux.nvar + 3));
+        return { cells: profile, post: state(0), pre: state(behind + ahead - 1) };
     }
 
     /**
@@ -311,11 +937,15 @@ class EulerSolver {
                     if (!(alpha > 1e-12)) continue;
                     const mat = mats[m];
                     const mass = U[idx + 3 + M + m];
-                    if (mat.table && mass > 0) {
-                        const rhoK = mass / alpha;
-                        const T = p / (rhoK * mat.R);
-                        energy += mass * EulerSolver.tableEnergy(mat.table, T);
-                        xi += alpha * EulerSolver.tableCv(mat.table, T) / mat.R;
+                    const table = mat.table;
+                    if (table && mass > 0) {
+                        // T = p / (rho_k R); tableEnergy and tableCv inlined
+                        const x = p * alpha / (mass * mat.R * table.dT);
+                        let j = x | 0;
+                        if (j > table.n - 2) j = table.n - 2; else if (j < 0) j = 0;
+                        const e0 = table.e[j], de = table.e[j + 1] - e0;
+                        energy += mass * (e0 + de * (x - j));
+                        xi += alpha * de / (table.dT * mat.R);
                     } else {
                         energy += alpha * (mat.G * p + mat.P);
                         xi += alpha * mat.G;
@@ -474,6 +1104,7 @@ class EulerSolver {
      * non-conservative part of the advection is added in updateConservative.
      */
     computeFluxes() {
+        if (this.order === 2) return this.computeFluxesMUSCL();
         const U = this.U;
         const nx = this.nx;
         const nvar = this.nvar;
@@ -549,6 +1180,251 @@ class EulerSolver {
     }
 
     /**
+     * Pressure and rho*a^2 of every cell for constant-gamma and stiffened
+     * materials: rho*a^2 = gamma*(p + pinf) = (p*(G+1) + P)/G.
+     */
+    closeLinear(U) {
+        const nvar = this.nvar, tiny = 1e-10;
+        const G = this.eosG, P = this.eosP, p = this.pc, rc2 = this.rc2;
+        for (let i = 0; i < this.nx; i++) {
+            const c = i * nvar;
+            const rho = Math.max(U[c], tiny);
+            const u = U[c + 1] / rho;
+            p[i] = (U[c + 2] - 0.5 * rho * u * u - P[i]) / G[i];
+            rc2[i] = (p[i] * (G[i] + 1) + P[i]) / G[i];
+            if (!(rc2[i] > tiny)) {
+                rc2[i] = tiny;
+                p[i] = (tiny * G[i] - P[i]) / (G[i] + 1);
+            }
+        }
+    }
+
+    /**
+     * State at one face of a cell from its primitive variables and slopes
+     * (side = +1 for the right face, -1 for the left face). Density, velocity,
+     * pressure and volume fractions are reconstructed and the energy is
+     * rebuilt from them, so a uniform pressure and velocity stay uniform
+     * across material interfaces.
+     */
+    faceState(out, cell, side, mirror) {
+        const np = this.nprim, M = this.numMaterials, tiny = 1e-10;
+        const W = this.W, dW = this.dW;
+        const w = cell * np, h = 0.5 * side;
+        const u = mirror ? -(W[w + 1] + h * dW[w + 1]) : W[w + 1] + h * dW[w + 1];
+        const p = W[w + 2] + h * dW[w + 2];
+        let rho = W[w] + h * dW[w];
+        let G = 0, P = 0, internal, rc2;
+
+        if (M === 0) {
+            // Sharp method: the cell's own equation of state
+            G = this.eosG[cell];
+            P = this.eosP[cell];
+            internal = G * p + P;
+            rc2 = (p * (G + 1) + P) / G;
+        } else {
+            const alphaOut = out.alpha;
+            let total = 0;
+            for (let m = 0; m < M; m++) {
+                let alpha = W[w + 3 + m] + h * dW[w + 3 + m];
+                alpha = alpha < 0 ? 0 : (alpha > 1 ? 1 : alpha);
+                alphaOut[m] = alpha;
+                total += alpha;
+            }
+            const scale = 1 / total;
+
+            if (this.tabulated) {
+                const mats = this.materialProperties;
+                internal = 0;
+                rho = 0;
+                let present = 0;
+                for (let m = 0; m < M; m++) {
+                    const alpha = (alphaOut[m] *= scale);
+                    const rhoK = W[w + 3 + M + m] + h * dW[w + 3 + M + m];
+                    if (!(rhoK > 0) || !(alpha > 1e-12)) {
+                        // Trace material: carry the cell's partial density unchanged
+                        out.mass[m] = this.U[cell * this.nvar + 3 + M + m];
+                        rho += out.mass[m];
+                        continue;
+                    }
+                    const mass = alpha * rhoK;
+                    out.mass[m] = mass;
+                    rho += mass;
+                    present += alpha;
+                    const table = mats[m].table;
+                    if (table) {
+                        // Inlined tableEnergy / tableCv
+                        const x = p / (rhoK * this.matR[m] * table.dT);
+                        let j = x | 0;
+                        if (j > table.n - 2) j = table.n - 2; else if (j < 0) j = 0;
+                        const e0 = table.e[j], de = table.e[j + 1] - e0;
+                        internal += mass * (e0 + de * (x - j));
+                        G += alpha * de / (table.dT * this.matR[m]);
+                    } else {
+                        internal += alpha * (this.matG[m] * p + this.matP[m]);
+                        G += alpha * this.matG[m];
+                        P += alpha * this.matP[m];
+                    }
+                }
+                rc2 = (p * (G + present) + P) / G;
+            } else {
+                const matG = this.matG, matP = this.matP;
+                for (let m = 0; m < M; m++) {
+                    const alpha = (alphaOut[m] *= scale);
+                    G += alpha * matG[m];
+                    P += alpha * matP[m];
+                }
+                internal = G * p + P;
+                rc2 = (p * (G + 1) + P) / G;
+            }
+        }
+
+        if (!(rho > tiny)) rho = tiny;
+        out.rc2 = rc2 > tiny ? rc2 : tiny;
+        out.rho = rho;
+        out.mom = rho * u;
+        out.p = p;
+        out.E = internal + 0.5 * rho * u * u;
+    }
+
+    /**
+     * First half of a second-order flux evaluation: equation of state,
+     * primitive variables and their limited slopes.
+     * @returns {number} largest |u| + a over the cells, for the time step
+     */
+    musclPrepare() {
+        const U = this.U, nx = this.nx, nvar = this.nvar, np = this.nprim;
+        const M = this.numMaterials, W = this.W, dW = this.dW;
+        const pc = this.pc, rc2 = this.rc2;
+        const tabulated = this.tabulated;
+        const tiny = 1e-10;
+
+        if (this.interfaceMethod === 'mixed') this.updateEOS(U);
+        if (!tabulated) this.closeLinear(U);
+
+        let maxSpeed = 0;
+        for (let i = 0; i < nx; i++) {
+            const c = i * nvar, w = i * np;
+            const rho = U[c] > tiny ? U[c] : tiny;
+            const u = U[c + 1] / rho;
+            W[w] = rho;
+            W[w + 1] = u;
+            W[w + 2] = pc[i];
+            for (let m = 0; m < M; m++) {
+                const alpha = U[c + 3 + m];
+                W[w + 3 + m] = alpha;
+                // Phasic density; zero marks a material that is absent from the cell
+                if (tabulated) W[w + 3 + M + m] = alpha > 1e-12 ? U[c + 3 + M + m] / alpha : 0;
+            }
+            const speed = (u < 0 ? -u : u) + Math.sqrt(rc2[i] / rho);
+            if (speed > maxSpeed) maxSpeed = speed;
+        }
+
+        // Limited slopes: minmod, which never creates new extrema. Cells next
+        // to a wall, and phasic densities next to a cell without that
+        // material, stay piecewise constant.
+        const plain = tabulated ? 3 + M : np;
+        for (let k = 0; k < np; k++) {
+            dW[k] = 0;
+            dW[(nx - 1) * np + k] = 0;
+        }
+        for (let i = 1; i < nx - 1; i++) {
+            const w = i * np;
+            for (let k = 0; k < plain; k++) {
+                const here = W[w + k];
+                const a = here - W[w - np + k], b = W[w + np + k] - here;
+                dW[w + k] = a * b > 0 ? ((a < 0 ? -a : a) < (b < 0 ? -b : b) ? a : b) : 0;
+            }
+            for (let k = plain; k < np; k++) {
+                const here = W[w + k], left = W[w - np + k], right = W[w + np + k];
+                const a = here - left, b = right - here;
+                dW[w + k] = (here > 0 && left > 0 && right > 0 && a * b > 0)
+                    ? ((a < 0 ? -a : a) < (b < 0 ? -b : b) ? a : b) : 0;
+            }
+        }
+        return maxSpeed;
+    }
+
+    /**
+     * Advance the cell-centred primitive variables by half a time step using
+     * their slopes (the predictor of the MUSCL-Hancock scheme):
+     *
+     *     rho_t = -u rho_x - rho u_x        u_t = -u u_x - p_x / rho
+     *     p_t   = -u p_x - rho a^2 u_x      alpha_t = -u alpha_x
+     *
+     * and, for each phasic density, the same equation as rho. With a varying
+     * cross-section A, u_x in the density and pressure equations becomes
+     * u_x + u A_x / A.
+     */
+    musclPredict(dt) {
+        const nx = this.nx, np = this.nprim, M = this.numMaterials;
+        const W = this.W, dW = this.dW, rc2 = this.rc2;
+        const half = 0.5 * dt / this.dx;
+        const lastAlpha = 3 + M;
+        const area = this.variableArea, AF = this.areaFace, AC = this.areaCell;
+        for (let i = 1; i < nx - 1; i++) {
+            const w = i * np;
+            const rho = W[w], u = W[w + 1];
+            const du = dW[w + 1], dp = dW[w + 2];
+            // Velocity divergence, including the change of cross-section
+            const div = area ? du + u * (AF[i + 1] - AF[i]) / AC[i] : du;
+            W[w] = rho - half * (u * dW[w] + rho * div);
+            W[w + 1] = u - half * (u * du + dp / rho);
+            W[w + 2] -= half * (u * dp + rc2[i] * div);
+            for (let k = 3; k < lastAlpha; k++) W[w + k] -= half * u * dW[w + k];
+            for (let k = lastAlpha; k < np; k++) {
+                if (W[w + k] > 0) W[w + k] -= half * (u * dW[w + k] + W[w + k] * div);
+            }
+        }
+    }
+
+    /** Second half of a second-order flux evaluation: HLLC between face states. */
+    musclFluxes() {
+        const nx = this.nx, nvar = this.nvar, M = this.numMaterials;
+        const flux = this.flux, tabulated = this.tabulated;
+        const L = this.faceL, R = this.faceR;
+        let maxWaveSpeed = 0;
+
+        for (let i = 0; i <= nx; i++) {
+            const f = i * nvar;
+            if (i === 0) {
+                this.faceState(R, 0, -1, false);
+                this.faceState(L, 0, -1, true);       // mirror image behind the wall
+            } else if (i === nx) {
+                this.faceState(L, nx - 1, 1, false);
+                this.faceState(R, nx - 1, 1, true);
+            } else {
+                this.faceState(L, i - 1, 1, false);
+                this.faceState(R, i, -1, false);
+            }
+
+            const waveSpeed = this.hllcFlux(L.rho, L.mom, L.E, L.p, L.rc2, R.rho, R.mom, R.E, R.p, R.rc2, f);
+            const uFace = this._uFace;
+            this.faceVelocity[i] = uFace;
+
+            if (M > 0) {
+                const up = this._upwind === 0 ? L : R;
+                for (let m = 0; m < M; m++) flux[f + 3 + m] = up.alpha[m] * uFace;
+                if (tabulated) {
+                    const massFlux = flux[f] / up.rho;
+                    for (let m = 0; m < M; m++) flux[f + 3 + M + m] = massFlux * up.mass[m];
+                }
+            }
+            if (waveSpeed > maxWaveSpeed) maxWaveSpeed = waveSpeed;
+        }
+        return maxWaveSpeed;
+    }
+
+    /**
+     * Second-order fluxes for the Runge-Kutta integrators: limited linear
+     * reconstruction of the primitive variables in each cell, then the HLLC
+     * flux between the two face states.
+     */
+    computeFluxesMUSCL() {
+        this.musclPrepare();
+        return this.musclFluxes();
+    }
+
+    /**
      * Forward-Euler update Uout = U - dt * dF/dx using the stored fluxes.
      * Volume fractions obey the advection equation d(alpha)/dt + u d(alpha)/dx = 0,
      * discretized as div(alpha*u) - alpha*div(u) with the same face velocities
@@ -556,6 +1432,10 @@ class EulerSolver {
      * oscillations.
      */
     updateConservative(U, Uout, dt) {
+        if (this.variableArea) {
+            this.updateConservativeArea(U, Uout, dt);
+            return;
+        }
         const nvar = this.nvar;
         const lambda = dt / this.dx;
         const flux = this.flux;
@@ -572,9 +1452,17 @@ class EulerSolver {
             if (nvar > 3) {
                 const lastAlpha = 3 + this.numMaterials;
                 const divU = this.faceVelocity[i + 1] - this.faceVelocity[i];
-                for (let k = 3; k < lastAlpha; k++) {
-                    const alpha = U[idx + k];
-                    Uout[idx + k] = alpha - lambda * (flux[fR + k] - flux[fL + k] - alpha * divU);
+                if (this.alphaAtHalfStep) {
+                    // MUSCL-Hancock: the non-conservative term uses the predicted value
+                    const w = i * this.nprim;
+                    for (let k = 3; k < lastAlpha; k++) {
+                        Uout[idx + k] = U[idx + k] - lambda * (flux[fR + k] - flux[fL + k] - this.W[w + k] * divU);
+                    }
+                } else {
+                    for (let k = 3; k < lastAlpha; k++) {
+                        const alpha = U[idx + k];
+                        Uout[idx + k] = alpha - lambda * (flux[fR + k] - flux[fL + k] - alpha * divU);
+                    }
                 }
                 // Partial densities are conserved
                 for (let k = lastAlpha; k < nvar; k++) {
@@ -585,9 +1473,48 @@ class EulerSolver {
     }
 
     /**
-     * Update per-cell gas properties after a completed time step
+     * The same update for a tube of varying cross-section A(x):
+     *
+     *     d(A U)/dt + d(A F)/dx = [0, p dA/dx, 0]
+     *
+     * The wall pressure term uses the cell pressure, so gas at rest stays at
+     * rest across an area change. Volume fractions are advected with the
+     * area-weighted face velocities.
      */
-    updateGasProperties() {
+    updateConservativeArea(U, Uout, dt) {
+        const nvar = this.nvar, M = this.numMaterials;
+        const flux = this.flux, AF = this.areaFace, AC = this.areaCell;
+        const lastAlpha = 3 + M;
+        const half = this.alphaAtHalfStep;   // MUSCL-Hancock: use predicted cell values
+
+        for (let i = 0; i < this.nx; i++) {
+            const idx = i * nvar, fL = idx, fR = idx + nvar;
+            const aL = AF[i], aR = AF[i + 1];
+            const lambda = dt / (this.dx * AC[i]);
+            const pCell = half ? this.W[i * this.nprim + 2] : this.pc[i];
+
+            Uout[idx] = U[idx] - lambda * (aR * flux[fR] - aL * flux[fL]);
+            Uout[idx + 1] = U[idx + 1] - lambda * (aR * flux[fR + 1] - aL * flux[fL + 1] - pCell * (aR - aL));
+            Uout[idx + 2] = U[idx + 2] - lambda * (aR * flux[fR + 2] - aL * flux[fL + 2]);
+
+            if (M > 0) {
+                const divU = aR * this.faceVelocity[i + 1] - aL * this.faceVelocity[i];
+                for (let k = 3; k < lastAlpha; k++) {
+                    const alpha = half ? this.W[i * this.nprim + k] : U[idx + k];
+                    Uout[idx + k] = U[idx + k] - lambda * (aR * flux[fR + k] - aL * flux[fL + k] - alpha * divU);
+                }
+                for (let k = lastAlpha; k < nvar; k++) {
+                    Uout[idx + k] = U[idx + k] - lambda * (aR * flux[fR + k] - aL * flux[fL + k]);
+                }
+            }
+        }
+    }
+
+    /**
+     * Remove round-off drift from the volume fractions after a time step:
+     * clamp to [0, 1] and renormalize.
+     */
+    clampFractions() {
         if (this.interfaceMethod === 'mixed') {
             // Remove round-off drift: clamp to [0, 1] and renormalize
             const nvar = this.nvar;
@@ -612,6 +1539,19 @@ class EulerSolver {
                 }
             }
         }
+    }
+
+    /** Bring the equation of state and the primitive variables up to date with U. */
+    refreshOutput() {
+        this.updateEOS(this.U);
+        this.updatePrimitives();
+    }
+
+    /**
+     * Update per-cell gas properties after a completed time step
+     */
+    updateGasProperties() {
+        this.clampFractions();
         this.updateEOS(this.U);
     }
 
@@ -624,8 +1564,9 @@ class EulerSolver {
             const cellIdx = Math.floor(tracer.x / this.dx);
             const clampedIdx = Math.max(0, Math.min(this.nx - 1, cellIdx));
             
-            // Get velocity at tracer location
-            const velocity = this.u[clampedIdx];
+            // Velocity of the cell holding the tracer
+            const c = clampedIdx * this.nvar;
+            const velocity = this.U[c + 1] / Math.max(this.U[c], 1e-10);
             
             // Update position using forward Euler (good enough for tracers)
             tracer.x += velocity * this.dt;
@@ -679,6 +1620,7 @@ class EulerSolver {
             T: Array.from(this.T),
             xtData: this.xtData,
             tracers: this.tracers,
+            area: Array.from(this.areaCell),
             timeSteps: this.timeSteps,
             wallTime: this.wallTime || 0,
             interfaceMethod: this.interfaceMethod
@@ -714,7 +1656,10 @@ class EulerSolver {
         } finally {
             this.wallTime = (this.wallTime || 0) + (Date.now() - begin) / 1000;
         }
-        return this.t >= this.finalTime;
+        const done = this.t >= this.finalTime;
+        // Primitive variables are only kept current at snapshots and at the end
+        if (done) this.refreshOutput();
+        return done;
     }
 
     /**

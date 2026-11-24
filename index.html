@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@400;600;700&display=swap" rel="stylesheet">
-<link href="css/app.css?v=2" rel="stylesheet">
+<link href="css/app.css?v=10" rel="stylesheet">
 </head>
 <body>
 
@@ -78,7 +78,11 @@
     </select>
     <span class="unit"></span>
 
-    <label for="areafact" title="Divides the gauge driver pressure estimate. Use 1 for a constant-area tube.">Area contraction factor</label>
+    <label for="arearatio" title="Driver cross-section divided by driven cross-section at the diaphragm. 1 is a constant-area tube; larger drivers need less pressure.">Driver/driven area ratio</label>
+    <input id="arearatio" type="number" step="any" min="1" value="1" inputmode="decimal">
+    <span class="unit"></span>
+
+    <label for="areafact" title="Empirical factor from the original calculator: divides the gauge value shown as approximate driver pressure. It does not affect the results table.">Empirical area factor</label>
     <input id="areafact" type="number" step="any" min="0" value="1.35" inputmode="decimal">
     <span class="unit"></span>
   </div>
@@ -145,7 +149,9 @@
     <label for="wshocked">Incident shock speed</label><output id="wshocked"></output><span class="unit">m/s</span>
     <label for="wreflect" title="Lab frame">Reflected shock speed</label><output id="wreflect"></output><span class="unit">m/s</span>
     <label for="mreflect">Reflected shock Mach number</label><output id="mreflect"></output><span class="unit"></span>
-    <label for="pfourpsig" title="Gauge pressure divided by the area contraction factor">Approximate driver pressure</label><output id="pfourpsig"></output><span class="unit" data-unit="gauge"></span>
+    <label for="pfourpsig" title="Gauge driver pressure divided by the empirical area factor">Approximate driver pressure</label><output id="pfourpsig"></output><span class="unit" data-unit="gauge"></span>
+    <label for="outtailor" title="Pressure the expanded driver gas reaches when the reflected shock stops it, divided by the reshocked pressure. 1 is a tailored interface; above 1 a shock returns to the end wall, below 1 an expansion does.">Tailoring ratio</label><output id="outtailor"></output><span class="unit"></span>
+    <label for="outtailormach" title="Incident Mach number at which the interface is tailored for these gases and temperatures">Tailored Mach number</label><output id="outtailormach"></output><span class="unit"></span>
     <label for="outmw" id="outmwLabel">Driven gas molecular weight</label><output id="outmw"></output><span class="unit">g/mol</span>
   </div>
   <button type="button" class="secondary small" id="showEquationsBtn">View equations</button>
@@ -243,21 +249,28 @@
 <div class="inline-form" id="xtSettings">
   <label>Time (ms) <input type="number" id="xtSimTime" value="20" min="0" step="any" inputmode="decimal"></label>
   <label title="50 to 5000. Run time grows with the square of this.">Grid cells <input type="number" id="xtGridPoints" value="500" min="50" max="5000" step="50" inputmode="numeric"></label>
-  <label title="Time between stored frames; also the probe sampling interval">Snapshot interval (ms) <input type="number" id="xtSnapshotInterval" value="0.1" min="0" step="any" inputmode="decimal"></label>
-  <label title="Optional. Distances from the driver end wall, comma separated.">Probes (m) <input type="text" id="xtProbes" value="" placeholder="e.g. 4.5, 8.9" inputmode="decimal"></label>
+  <label title="Time between stored frames; also the probe sampling interval">Snapshot (ms) <input type="number" id="xtSnapshotInterval" value="0.1" min="0" step="any" inputmode="decimal"></label>
+  <label title="Optional. Distances from the driver end wall, separated by commas or spaces.">Probes (m) <input type="text" id="xtProbes" value="" placeholder="e.g. 4.5 8.9" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
   <label title="Variable γ uses NASA polynomial specific heats with frozen composition; liquids keep the stiffened-gas model. About 1.5 times slower.">Gas model
     <select id="xtGasModel">
       <option value="constant" selected>Constant γ</option>
       <option value="nasa">Variable γ</option>
     </select>
   </label>
-  <label>Integrator
+  <label title="Second order (MUSCL, minmod limiter) resolves shocks and interfaces in about half as many cells.">Accuracy
+    <select id="xtOrder">
+      <option value="2" selected>2nd order</option>
+      <option value="1">1st order</option>
+    </select>
+  </label>
+  <label title="Hancock needs one flux evaluation per step and is about four times faster than the Runge–Kutta schemes at the same accuracy.">Integrator
     <select id="xtIntegrator">
-      <option value="SSP" selected>SSP-RK3</option>
+      <option value="Hancock" selected>Hancock</option>
+      <option value="SSP">SSP-RK3</option>
       <option value="RK2">RK2</option>
     </select>
   </label>
-  <label title="0.8 suits SSP; use 0.4 with RK2">CFL <input type="number" id="xtCflNumber" value="0.8" min="0.05" max="0.9" step="0.05" inputmode="decimal"></label>
+  <label title="0.8 suits Hancock and SSP-RK3; use 0.4 with RK2">CFL <input type="number" id="xtCflNumber" value="0.8" min="0.05" max="0.9" step="0.05" inputmode="decimal"></label>
   <label id="xtInterfaceMethodLabel">Interfaces
     <select id="xtInterfaceMethod">
       <option value="mixed" selected>Mixed cell</option>
@@ -465,20 +478,21 @@ Submit issues &amp; feature requests on
 </div>
 
 <!-- Bump ?v= on every file when releasing, so browsers never mix cached and new scripts -->
-<script src="js/nasa9-data.js?v=2"></script>
-<script src="js/thermo.js?v=2"></script>
-<script src="js/gas-data.js?v=2"></script>
-<script src="js/shock-calc.js?v=2"></script>
-<script src="js/riemann-solver.js?v=2"></script>
-<script src="js/rmi-growth.js?v=2"></script>
-<script src="js/time-integrators.js?v=2"></script>
-<script src="js/euler-solver.js?v=2"></script>
-<script src="js/xt-visualization.js?v=2"></script>
-<script src="js/ui-common.js?v=2"></script>
-<script src="js/app-main.js?v=2"></script>
-<script src="js/app-rmi.js?v=2"></script>
-<script src="js/app-xt.js?v=2"></script>
-<script src="js/xt-export.js?v=2"></script>
+<script src="js/nasa9-data.js?v=10"></script>
+<script src="js/thermo.js?v=10"></script>
+<script src="js/gas-data.js?v=10"></script>
+<script src="js/shock-calc.js?v=10"></script>
+<script src="js/riemann-solver.js?v=10"></script>
+<script src="js/rmi-growth.js?v=10"></script>
+<script src="js/time-integrators.js?v=10"></script>
+<script src="js/euler-solver.js?v=10"></script>
+<script src="js/xt-analysis.js?v=10"></script>
+<script src="js/xt-visualization.js?v=10"></script>
+<script src="js/ui-common.js?v=10"></script>
+<script src="js/app-main.js?v=10"></script>
+<script src="js/app-rmi.js?v=10"></script>
+<script src="js/app-xt.js?v=10"></script>
+<script src="js/xt-export.js?v=10"></script>
 
 </body>
 </html>

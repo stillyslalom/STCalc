@@ -120,6 +120,7 @@ async function exportXTDataHDF5() {
         f.get('metadata').create_dataset({name: 'integrator', data: [xtRunConfig.integrator]});
         f.get('metadata').create_dataset({name: 'interface_method', data: [xtResults.interfaceMethod]});
         f.get('metadata').create_dataset({name: 'gas_model', data: [xtRunConfig.gasModel]});
+        f.get('metadata').create_dataset({name: 'spatial_order', data: [xtRunConfig.order], dtype: '<i'});
         f.get('metadata').create_dataset({name: 'simulation_datetime', data: [now.toISOString()]});
         f.get('metadata').create_dataset({name: 'wall_time', data: [xtResults.wallTime || 0], dtype: '<d'});
         
@@ -138,6 +139,8 @@ async function exportXTDataHDF5() {
         
         // Write coordinates
         f.get('coordinates').create_dataset({name: 'x', data: xtResults.x, dtype: '<d'});
+        // Tube cross-section at each cell (relative units)
+        f.get('coordinates').create_dataset({name: 'area', data: xtResults.area, dtype: '<d'});
         const timeArray = xtResults.xtData.map(snap => snap.t);
         f.get('coordinates').create_dataset({name: 't', data: timeArray, dtype: '<d'});
         
