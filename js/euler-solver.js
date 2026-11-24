@@ -1,6 +1,6 @@
 /**
  * 1D Compressible Euler Solver with HLLC Flux
- * For multicomponent shock tube simulations
+ * For multicomponent shock tube simulations with ideal or stiffened gases
  */
 
 class EulerSolver {
@@ -8,520 +8,461 @@ class EulerSolver {
         this.nx = config.nx || 500;  // Number of grid cells
         this.cfl = config.cfl || 0.4;  // CFL number for stability
         this.finalTime = config.finalTime || 0.02;  // Final simulation time (seconds)
-        
+
         // Interface tracking method: 'sharp' or 'mixed'
         this.interfaceMethod = config.interfaceMethod || 'sharp';
-        
+
         // Create time integrator instance
         this.integrator = IntegratorFactory.create(config.integrator || 'RK2');
 
-        // Initialize arrays using typed arrays for performance
         this.x = new Float64Array(this.nx);  // Cell centers
         this.dx = 0;  // Grid spacing (set during initialization)
-        
-        // Initialize conservative variable buffers based on integrator requirements
-        // All integrators now use the same 3-buffer structure: U, Un, Uk
-        this.U = new Float64Array(this.nx * 3);   // Current state
-        this.Un = new Float64Array(this.nx * 3);  // Storage buffer
-        this.Uk = new Float64Array(this.nx * 3);  // Work buffer
-        
+
+        // State buffers are allocated in initialize(), once the number of
+        // materials (and therefore variables per cell) is known.
+        // Layout per cell: [rho, rho*u, E, alpha_0 ... alpha_{M-1}]
+        // (volume fractions are only carried by the mixed-cell method)
+        this.nvar = 3;
+        this.U = null;   // Current state
+        this.Un = null;  // Storage buffer
+        this.Uk = null;  // Work buffer
+
         // Primitive variables for output
         this.rho = new Float64Array(this.nx);
         this.u = new Float64Array(this.nx);
         this.p = new Float64Array(this.nx);
         this.T = new Float64Array(this.nx);
-        
-        // Gas properties per cell
+
+        // Effective equation-of-state properties per cell
         this.gamma = new Float64Array(this.nx);
-        this.mw = new Float64Array(this.nx);  // Molecular weight
-        this.gasId = new Array(this.nx);  // Gas identifier for each cell
-        
-        // Flux array
-        this.flux = new Float64Array((this.nx + 1) * 3);
-        
+        this.mw = new Float64Array(this.nx);    // Molecular weight (volume-fraction weighted in mixed cells)
+        this.pinf = new Float64Array(this.nx);  // Stiffening pressure
+        this.gasId = new Array(this.nx);        // Gas identifier for each cell
+
+        // Stiffened-gas closure used by the flux: E = G*p + P + 0.5*rho*u^2
+        // with G = 1/(gamma-1) and P = gamma*pinf/(gamma-1)
+        this.eosG = new Float64Array(this.nx);
+        this.eosP = new Float64Array(this.nx);
+
+        // Face arrays
+        this.flux = null;
+        this.faceVelocity = new Float64Array(this.nx + 1);
+
         // Time tracking
         this.t = 0;
         this.dt = 0;
         this.timeSteps = 0;
-        
+
         // X-T diagram storage
-        this.xtData = [];  // Will store {t, x, p} at specified intervals
+        this.xtData = [];
         this.xtInterval = config.xtInterval || 0.0001;  // Store every 0.1 ms
         this.nextXTStore = 0;
-        
+
         // Lagrangian tracers
         this.tracers = [];
-        
+
         // Regions for sharp interface tracking
-        this.regions = [];  // Store {gamma, mw, gasId} for each region between interfaces
-        
-        // Material fraction tracking for mixed-cell method
-        this.numMaterials = 0;  // Set during initialization
-        this.materialFractions = null;  // Allocated if interfaceMethod === 'mixed'
-        this.materialProperties = [];  // Array of {gamma, mw, gasId} for each material
-        this.materialFlux = null;  // Flux for material fractions
-        
+        this.regions = [];
+
+        // Materials for the mixed-cell method
+        this.numMaterials = 0;
+        this.materialFractions = null;  // Output copy of the volume fractions
+        this.materialProperties = [];   // {gamma, mw, pinf, gasId} per material
+
         // Constants
         this.Ru = 8314.51;  // Universal gas constant J/(kmol·K)
     }
-    
+
     /**
      * Initialize the shock tube with gas slabs
-     * @param {Array} slabs - Array of {gas, pressure, temperature, length, position}
+     * @param {Array} slabs - Array of {gasId, gamma, mw, pinf, pressure, temperature, length, velocity}
      */
     initialize(slabs) {
-        // Calculate total length
+        const mixed = this.interfaceMethod === 'mixed';
+        const materials = slabs.map(slab => ({
+            gamma: slab.gamma,
+            mw: slab.mw,
+            pinf: slab.pinf || 0,
+            gasId: slab.gasId,
+            G: 1 / (slab.gamma - 1),
+            P: slab.gamma * (slab.pinf || 0) / (slab.gamma - 1),
+            R: this.Ru / slab.mw
+        }));
+
+        if (!mixed && materials.some(m => m.pinf !== materials[0].pinf)) {
+            throw new Error('Slabs with different stiffening pressures (e.g. gas next to liquid) require the Mixed-Cell interface method.');
+        }
+
+        this.materialProperties = materials;
+        this.regions = materials;
+        this.numMaterials = mixed ? slabs.length : 0;
+        this.nvar = 3 + this.numMaterials;
+
+        const n = this.nx * this.nvar;
+        this.U = new Float64Array(n);
+        this.Un = new Float64Array(n);
+        this.Uk = new Float64Array(n);
+        this.flux = new Float64Array((this.nx + 1) * this.nvar);
+        if (mixed) {
+            this.materialFractions = new Float64Array(this.nx * this.numMaterials);
+        }
+
         const totalLength = slabs.reduce((sum, slab) => sum + slab.length, 0);
         this.dx = totalLength / this.nx;
-        
-        // Create grid points (cell centers)
         for (let i = 0; i < this.nx; i++) {
             this.x[i] = (i + 0.5) * this.dx;
         }
-        
-        // Assign gas properties and initial conditions to each cell
-        let currentPos = 0;
-        let slabIndex = 0;
-        
+
+        // Slab edges
+        const edges = [0];
+        for (const slab of slabs) edges.push(edges[edges.length - 1] + slab.length);
+
         for (let i = 0; i < this.nx; i++) {
-            const cellCenter = this.x[i];
-            
-            // Find which slab this cell belongs to
-            while (slabIndex < slabs.length - 1 && cellCenter >= currentPos + slabs[slabIndex].length) {
-                currentPos += slabs[slabIndex].length;
-                slabIndex++;
-            }
-            
-            const slab = slabs[slabIndex];
-            
-            // Store gas properties
-            this.gamma[i] = slab.gamma;
-            this.mw[i] = slab.mw;
-            this.gasId[i] = slab.gasId;
-            
-            // Calculate gas constant for this gas
-            const R = this.Ru / slab.mw;
-            
-            // Set primitive variables
-            const rho = slab.pressure / (R * slab.temperature);
-            const u = 0;  // Initially at rest
-            const p = slab.pressure;
-            
-            // Convert to conservative variables
-            const E = p / (slab.gamma - 1) + 0.5 * rho * u * u;
-            
-            const idx = i * 3;
-            this.U[idx] = rho;
-            this.U[idx + 1] = rho * u;
-            this.U[idx + 2] = E;
-        }
-        
-        // Store region properties for sharp interface tracking
-        // Each region corresponds to a slab's gas properties
-        this.regions = slabs.map(slab => ({
-            gamma: slab.gamma,
-            mw: slab.mw,
-            gasId: slab.gasId
-        }));
-        
-        // Initialize Lagrangian tracers at slab interfaces
-        currentPos = 0;
-        for (let i = 0; i < slabs.length; i++) {
-            currentPos += slabs[i].length;
-            if (i < slabs.length - 1) {  // Don't add tracer at end
-                this.tracers.push({
-                    x: currentPos,
-                    trajectory: [{t: 0, x: currentPos, v: 0}]
-                });
-            }
-        }
-        
-        // Initialize mixed-cell method if selected
-        if (this.interfaceMethod === 'mixed') {
-            this.numMaterials = slabs.length;
-            this.materialFractions = new Float64Array(this.nx * this.numMaterials);
-            this.materialFlux = new Float64Array((this.nx + 1) * this.numMaterials);
-            
-            // Store material properties
-            this.materialProperties = slabs.map(slab => ({
-                gamma: slab.gamma,
-                mw: slab.mw,
-                gasId: slab.gasId
-            }));
-            
-            // Initialize material fractions based on slab positions
-            currentPos = 0;
-            slabIndex = 0;
-            for (let i = 0; i < this.nx; i++) {
-                const cellLeft = i * this.dx;
-                const cellRight = (i + 1) * this.dx;
-                
-                // Find which slab(s) this cell overlaps
-                let tempPos = 0;
+            const idx = i * this.nvar;
+            const cellLeft = i * this.dx;
+            const cellRight = (i + 1) * this.dx;
+
+            if (mixed) {
+                // Volume-average every slab overlapping this cell so that
+                // density, energy and volume fractions are mutually consistent
+                let rho = 0, mom = 0, internal = 0, total = 0;
                 for (let s = 0; s < slabs.length; s++) {
-                    const slabLeft = tempPos;
-                    const slabRight = tempPos + slabs[s].length;
-                    
-                    // Calculate overlap
-                    const overlapLeft = Math.max(cellLeft, slabLeft);
-                    const overlapRight = Math.min(cellRight, slabRight);
-                    const overlap = Math.max(0, overlapRight - overlapLeft);
-                    
-                    this.materialFractions[i * this.numMaterials + s] = overlap / this.dx;
-                    
-                    tempPos += slabs[s].length;
+                    const overlap = Math.max(0, Math.min(cellRight, edges[s + 1]) - Math.max(cellLeft, edges[s]));
+                    const alpha = overlap / this.dx;
+                    this.U[idx + 3 + s] = alpha;
+                    if (alpha <= 0) continue;
+                    const mat = materials[s];
+                    const rhoS = (slabs[s].pressure + mat.pinf) / (mat.R * slabs[s].temperature);
+                    const uS = slabs[s].velocity || 0;
+                    rho += alpha * rhoS;
+                    mom += alpha * rhoS * uS;
+                    internal += alpha * (mat.G * slabs[s].pressure + mat.P);
+                    total += alpha;
                 }
+                // Guard against round-off at the domain end
+                for (let s = 0; s < slabs.length; s++) this.U[idx + 3 + s] /= total;
+                this.U[idx] = rho / total;
+                this.U[idx + 1] = mom / total;
+                this.U[idx + 2] = internal / total + 0.5 * mom * mom / (rho * total);
+            } else {
+                let s = 0;
+                while (s < slabs.length - 1 && this.x[i] >= edges[s + 1]) s++;
+                const mat = materials[s];
+                const rho = (slabs[s].pressure + mat.pinf) / (mat.R * slabs[s].temperature);
+                const u = slabs[s].velocity || 0;
+                this.U[idx] = rho;
+                this.U[idx + 1] = rho * u;
+                this.U[idx + 2] = mat.G * slabs[s].pressure + mat.P + 0.5 * rho * u * u;
             }
         }
-        
-        // Update primitive variables
+
+        // Lagrangian tracers at slab interfaces
+        for (let s = 1; s < slabs.length; s++) {
+            this.tracers.push({
+                x: edges[s],
+                trajectory: [{t: 0, x: edges[s], v: 0}]
+            });
+        }
+
+        this.updateGasProperties();
         this.updatePrimitives();
-        
-        // Store initial x-t data
         this.storeXTData();
     }
-    
+
+    /**
+     * Refresh the per-cell equation of state (eosG, eosP) from a state vector.
+     * Mixed-cell: volume-fraction average of 1/(gamma-1) and gamma*pinf/(gamma-1),
+     * which keeps pressure and velocity uniform across material interfaces.
+     * Sharp: properties of the region between Lagrangian tracers.
+     */
+    updateEOS(U) {
+        const nvar = this.nvar;
+        if (this.interfaceMethod === 'mixed') {
+            const M = this.numMaterials;
+            const mats = this.materialProperties;
+            for (let i = 0; i < this.nx; i++) {
+                const base = i * nvar + 3;
+                let G = 0, P = 0, total = 0;
+                for (let m = 0; m < M; m++) {
+                    const alpha = Math.min(1, Math.max(0, U[base + m]));
+                    G += alpha * mats[m].G;
+                    P += alpha * mats[m].P;
+                    total += alpha;
+                }
+                if (total > 1e-12) {
+                    this.eosG[i] = G / total;
+                    this.eosP[i] = P / total;
+                } else {
+                    this.eosG[i] = mats[0].G;
+                    this.eosP[i] = mats[0].P;
+                }
+            }
+        } else {
+            const tracerPositions = this.tracers.map(t => t.x).sort((a, b) => a - b);
+            let regionIndex = 0;
+            for (let i = 0; i < this.nx; i++) {
+                while (regionIndex < tracerPositions.length && this.x[i] > tracerPositions[regionIndex]) {
+                    regionIndex++;
+                }
+                const region = this.regions[Math.min(regionIndex, this.regions.length - 1)];
+                this.eosG[i] = region.G;
+                this.eosP[i] = region.P;
+            }
+        }
+    }
+
     /**
      * Convert conservative to primitive variables
      */
     updatePrimitives() {
         const minDensity = 1e-10;  // Minimum density threshold for numerical stability
+        const nvar = this.nvar;
+        const mixed = this.interfaceMethod === 'mixed';
 
         for (let i = 0; i < this.nx; i++) {
-            const idx = i * 3;
-            const rho = this.U[idx];
-            const rhou = this.U[idx + 1];
-            const E = this.U[idx + 2];
-            const gamma = this.gamma[i];
+            const idx = i * nvar;
+            const rho = Math.max(this.U[idx], minDensity);
+            const u = this.U[idx + 1] / rho;
+            const G = this.eosG[i];
+            const P = this.eosP[i];
+            const pinf = P / (G + 1);
 
-            // Guard against zero or negative density
-            if (rho < minDensity) {
-                console.error(`Warning: Near-zero density detected at cell ${i}: ${rho}`);
-                this.rho[i] = minDensity;
-                this.u[i] = 0;
-                this.p[i] = minDensity;
-                this.T[i] = 1;
-                continue;
-            }
+            // p = (E - 0.5*rho*u^2 - P) / G, floored so that p + pinf > 0
+            let p = (this.U[idx + 2] - 0.5 * rho * u * u - P) / G;
+            const pFloor = -pinf + minDensity;
+            if (!(p > pFloor)) p = pFloor;
 
             this.rho[i] = rho;
-            this.u[i] = rhou / rho;
+            this.u[i] = u;
+            this.p[i] = p;
+            this.gamma[i] = 1 + 1 / G;
+            this.pinf[i] = pinf;
 
-            // p = (gamma - 1) * (E - 0.5 * rho * u^2)
-            const u = this.u[i];
-            this.p[i] = (gamma - 1) * (E - 0.5 * rho * u * u);
-
-            // Guard against negative pressure
-            if (this.p[i] < 0) {
-                console.error(`Warning: Negative pressure detected at cell ${i}: ${this.p[i]}`);
-                this.p[i] = minDensity;
-            }
-
-            // T = p / (rho * R)
-            const R = this.Ru / this.mw[i];
-            this.T[i] = this.p[i] / (rho * R);
-        }
-    }
-    
-    /**
-     * Compute HLLC flux at cell interface
-     */
-    hllcFlux(UL, UR, gammaL, gammaR, fluxOut, idx) {
-        const minDensity = 1e-10;  // Minimum density threshold
-
-        // Left state
-        const rhoL = Math.max(UL[0], minDensity);
-        const uL = UL[1] / rhoL;
-        const EL = UL[2];
-        const pL = Math.max((gammaL - 1) * (EL - 0.5 * rhoL * uL * uL), minDensity);
-        const aL = Math.sqrt(gammaL * pL / rhoL);
-        const HL = (EL + pL) / rhoL;
-
-        // Right state
-        const rhoR = Math.max(UR[0], minDensity);
-        const uR = UR[1] / rhoR;
-        const ER = UR[2];
-        const pR = Math.max((gammaR - 1) * (ER - 0.5 * rhoR * uR * uR), minDensity);
-        const aR = Math.sqrt(gammaR * pR / rhoR);
-        const HR = (ER + pR) / rhoR;
-        
-        // Wave speed estimates (Davis)
-        const SL = Math.min(uL - aL, uR - aR);
-        const SR = Math.max(uL + aL, uR + aR);
-        
-        // Middle wave speed
-        const SStar = (pR - pL + rhoL * uL * (SL - uL) - rhoR * uR * (SR - uR)) /
-                      (rhoL * (SL - uL) - rhoR * (SR - uR));
-        
-        // Compute flux based on wave structure
-        if (SL >= 0) {
-            // Left flux
-            fluxOut[idx] = rhoL * uL;
-            fluxOut[idx + 1] = rhoL * uL * uL + pL;
-            fluxOut[idx + 2] = uL * (EL + pL);
-        } else if (SStar >= 0) {
-            // Left star flux
-            const pStar = pL + rhoL * (SL - uL) * (SStar - uL);
-            const rhoStarL = rhoL * (SL - uL) / (SL - SStar);
-            const EStarL = rhoStarL * (EL / rhoL + (SStar - uL) * (SStar + pL / (rhoL * (SL - uL))));
-            
-            fluxOut[idx] = rhoStarL * SStar;
-            fluxOut[idx + 1] = rhoStarL * SStar * SStar + pStar;
-            fluxOut[idx + 2] = SStar * (EStarL + pStar);
-        } else if (SR >= 0) {
-            // Right star flux
-            const pStar = pR + rhoR * (SR - uR) * (SStar - uR);
-            const rhoStarR = rhoR * (SR - uR) / (SR - SStar);
-            const EStarR = rhoStarR * (ER / rhoR + (SStar - uR) * (SStar + pR / (rhoR * (SR - uR))));
-            
-            fluxOut[idx] = rhoStarR * SStar;
-            fluxOut[idx + 1] = rhoStarR * SStar * SStar + pStar;
-            fluxOut[idx + 2] = SStar * (EStarR + pStar);
-        } else {
-            // Right flux
-            fluxOut[idx] = rhoR * uR;
-            fluxOut[idx + 1] = rhoR * uR * uR + pR;
-            fluxOut[idx + 2] = uR * (ER + pR);
-        }
-        
-        return Math.max(Math.abs(SL), Math.abs(SR));
-    }
-    
-    /**
-     * Compute fluxes at all cell interfaces
-     */
-    computeFluxes() {
-        let maxWaveSpeed = 0;
-        
-        for (let i = 0; i <= this.nx; i++) {
-            let UL = new Float64Array(3);
-            let UR = new Float64Array(3);
-            let gammaL, gammaR;
-            
-            if (i === 0) {
-                // Left boundary - reflective
-                const idx = 0;
-                UL[0] = this.U[idx];
-                UL[1] = -this.U[idx + 1];  // Reflect velocity
-                UL[2] = this.U[idx + 2];
-                UR[0] = this.U[idx];
-                UR[1] = this.U[idx + 1];
-                UR[2] = this.U[idx + 2];
-                gammaL = this.gamma[0];
-                gammaR = this.gamma[0];
-            } else if (i === this.nx) {
-                // Right boundary - reflective
-                const idx = (this.nx - 1) * 3;
-                UL[0] = this.U[idx];
-                UL[1] = this.U[idx + 1];
-                UL[2] = this.U[idx + 2];
-                UR[0] = this.U[idx];
-                UR[1] = -this.U[idx + 1];  // Reflect velocity
-                UR[2] = this.U[idx + 2];
-                gammaL = this.gamma[this.nx - 1];
-                gammaR = this.gamma[this.nx - 1];
-            } else {
-                // Interior interface
-                const idxL = (i - 1) * 3;
-                const idxR = i * 3;
-                UL[0] = this.U[idxL];
-                UL[1] = this.U[idxL + 1];
-                UL[2] = this.U[idxL + 2];
-                UR[0] = this.U[idxR];
-                UR[1] = this.U[idxR + 1];
-                UR[2] = this.U[idxR + 2];
-                gammaL = this.gamma[i - 1];
-                gammaR = this.gamma[i];
-            }
-            
-            const waveSpeed = this.hllcFlux(UL, UR, gammaL, gammaR, this.flux, i * 3);
-            maxWaveSpeed = Math.max(maxWaveSpeed, waveSpeed);
-        }
-        
-        return maxWaveSpeed;
-    }
-    
-    /**
-     * Update conservative variables using computed fluxes
-     */
-    updateConservative(U, Uout, dt) {
-        for (let i = 0; i < this.nx; i++) {
-            const idx = i * 3;
-            const fluxL = (i) * 3;
-            const fluxR = (i + 1) * 3;
-            
-            for (let k = 0; k < 3; k++) {
-                Uout[idx + k] = U[idx + k] - dt / this.dx * (this.flux[fluxR + k] - this.flux[fluxL + k]);
-            }
-        }
-    }
-    
-    
-    /**
-     * Compute mixture properties from material fractions
-     * Uses thermodynamically consistent mixing rules
-     */
-    computeMixtureProperties(cellIdx) {
-        let gamma_mix_inv = 0;
-        let mw_mix = 0;
-        let totalFraction = 0;
-        let dominantMaterial = 0;
-        let maxFraction = 0;
-        
-        for (let m = 0; m < this.numMaterials; m++) {
-            const alpha = this.materialFractions[cellIdx * this.numMaterials + m];
-            const gamma = this.materialProperties[m].gamma;
-            const mw = this.materialProperties[m].mw;
-            
-            // Pressure-weighted average for gamma (thermodynamically consistent)
-            gamma_mix_inv += alpha / (gamma - 1);
-            
-            // Mass-weighted average for molecular weight
-            mw_mix += alpha * mw;
-            
-            totalFraction += alpha;
-            
-            // Track dominant material for gas ID
-            if (alpha > maxFraction) {
-                maxFraction = alpha;
-                dominantMaterial = m;
-            }
-        }
-        
-        // Normalize (should be ~1 but numerical errors possible)
-        if (totalFraction > 1e-10) {
-            gamma_mix_inv /= totalFraction;
-            mw_mix /= totalFraction;
-        } else {
-            // Fallback to first material if fractions sum to zero
-            gamma_mix_inv = 1.0 / (this.materialProperties[0].gamma - 1);
-            mw_mix = this.materialProperties[0].mw;
-            dominantMaterial = 0;
-        }
-        
-        return {
-            gamma: 1 + 1 / gamma_mix_inv,
-            mw: mw_mix,
-            gasId: this.materialProperties[dominantMaterial].gasId
-        };
-    }
-    
-    /**
-     * Update gas properties in each cell based on interface tracking method
-     */
-    updateGasProperties() {
-        if (this.interfaceMethod === 'mixed') {
-            // Mixed-cell method: compute mixture properties from volume fractions
-            for (let i = 0; i < this.nx; i++) {
-                const mixProps = this.computeMixtureProperties(i);
-                this.gamma[i] = mixProps.gamma;
-                this.mw[i] = mixProps.mw;
-                this.gasId[i] = mixProps.gasId;
-            }
-        } else {
-            // Sharp method: cells inherit properties from their region
-            const tracerPositions = this.tracers.map(t => t.x).sort((a, b) => a - b);
-            
-            for (let i = 0; i < this.nx; i++) {
-                const cellCenter = this.x[i];
-                
-                // Determine which region this cell is in
-                let regionIndex = 0;
-                for (let j = 0; j < tracerPositions.length; j++) {
-                    if (cellCenter > tracerPositions[j]) {
-                        regionIndex = j + 1;
-                    } else {
-                        break;
+            if (mixed) {
+                // Mixture temperature assuming the materials in a cell share p and T
+                const M = this.numMaterials;
+                const mats = this.materialProperties;
+                let sum = 0, mw = 0, total = 0, dominant = 0, maxAlpha = -1;
+                for (let m = 0; m < M; m++) {
+                    const alpha = Math.min(1, Math.max(0, this.U[idx + 3 + m]));
+                    this.materialFractions[i * M + m] = alpha;
+                    sum += alpha * (p + mats[m].pinf) / mats[m].R;
+                    mw += alpha * mats[m].mw;
+                    total += alpha;
+                    if (alpha > maxAlpha) {
+                        maxAlpha = alpha;
+                        dominant = m;
                     }
                 }
-                
-                // Clamp region index to valid range
-                regionIndex = Math.max(0, Math.min(this.regions.length - 1, regionIndex));
-                
-                // Update cell properties from the appropriate region
-                const region = this.regions[regionIndex];
-                this.gamma[i] = region.gamma;
+                this.T[i] = sum / (total * rho);
+                this.mw[i] = mw / total;
+                this.gasId[i] = mats[dominant].gasId;
+            } else {
+                // Region lookup mirrors updateEOS
+                const region = this.regionOfCell(i);
+                this.T[i] = (p + pinf) / (rho * region.R);
                 this.mw[i] = region.mw;
                 this.gasId[i] = region.gasId;
             }
         }
     }
-    
-    /**
-     * Advect material fractions using upwind scheme
-     * Solves ∂α/∂t + u·∂α/∂x = 0 for each material
-     */
-    advectMaterialFractions(dt) {
-        if (this.interfaceMethod !== 'mixed' || !this.materialFractions) {
-            return;
+
+    /** Region (slab material) containing cell i for the sharp method. */
+    regionOfCell(i) {
+        let regionIndex = 0;
+        for (let j = 0; j < this.tracers.length; j++) {
+            if (this.x[i] > this.tracers[j].x) regionIndex = j + 1;
         }
-        
-        // Compute fluxes for material fractions at cell interfaces
-        for (let i = 0; i <= this.nx; i++) {
-            for (let m = 0; m < this.numMaterials; m++) {
-                const fluxIdx = i * this.numMaterials + m;
-                
-                if (i === 0 || i === this.nx) {
-                    // Boundary: zero flux (reflective)
-                    this.materialFlux[fluxIdx] = 0;
-                } else {
-                    // Interior interface: upwind scheme
-                    // Interface velocity is average of adjacent cells
-                    const uInterface = 0.5 * (this.u[i - 1] + this.u[i]);
-                    
-                    if (uInterface > 0) {
-                        // Upwind from left
-                        const alphaL = this.materialFractions[(i - 1) * this.numMaterials + m];
-                        this.materialFlux[fluxIdx] = uInterface * alphaL;
-                    } else {
-                        // Upwind from right
-                        const alphaR = this.materialFractions[i * this.numMaterials + m];
-                        this.materialFlux[fluxIdx] = uInterface * alphaR;
-                    }
-                }
-            }
-        }
-        
-        // Update material fractions using computed fluxes
-        const alphaNew = new Float64Array(this.nx * this.numMaterials);
-        
-        for (let i = 0; i < this.nx; i++) {
-            for (let m = 0; m < this.numMaterials; m++) {
-                const idx = i * this.numMaterials + m;
-                const fluxL = i * this.numMaterials + m;
-                const fluxR = (i + 1) * this.numMaterials + m;
-                
-                alphaNew[idx] = this.materialFractions[idx] - 
-                               dt / this.dx * (this.materialFlux[fluxR] - this.materialFlux[fluxL]);
-            }
-            
-            // Normalize fractions to ensure they sum to 1
-            let totalAlpha = 0;
-            for (let m = 0; m < this.numMaterials; m++) {
-                const idx = i * this.numMaterials + m;
-                alphaNew[idx] = Math.max(0, Math.min(1, alphaNew[idx]));  // Clamp to [0,1]
-                totalAlpha += alphaNew[idx];
-            }
-            
-            // Renormalize
-            if (totalAlpha > 1e-10) {
-                for (let m = 0; m < this.numMaterials; m++) {
-                    const idx = i * this.numMaterials + m;
-                    alphaNew[idx] /= totalAlpha;
-                }
-            } else {
-                // If all fractions are zero, default to equal distribution
-                for (let m = 0; m < this.numMaterials; m++) {
-                    const idx = i * this.numMaterials + m;
-                    alphaNew[idx] = 1.0 / this.numMaterials;
-                }
-            }
-        }
-        
-        // Copy updated fractions back
-        this.materialFractions.set(alphaNew);
+        return this.regions[Math.min(regionIndex, this.regions.length - 1)];
     }
-    
+
+    /**
+     * HLLC flux between a left and a right state.
+     * Writes the conservative flux to this.flux at offset fluxIdx and returns
+     * the largest wave speed. The velocity of the Riemann solution at the face
+     * is left in this._uFace and the upwind side (0 = left, 1 = right) of the
+     * contact in this._upwind; both are needed to advect volume fractions.
+     */
+    hllcFlux(rhoL, momL, EL, GL, PL, rhoR, momR, ER, GR, PR, fluxIdx) {
+        const tiny = 1e-10;
+        const flux = this.flux;
+
+        rhoL = Math.max(rhoL, tiny);
+        rhoR = Math.max(rhoR, tiny);
+        const uL = momL / rhoL;
+        const uR = momR / rhoR;
+
+        // Pressure and rho*a^2 = gamma*(p + pinf) = (p*(G+1) + P)/G
+        let pL = (EL - 0.5 * rhoL * uL * uL - PL) / GL;
+        let pR = (ER - 0.5 * rhoR * uR * uR - PR) / GR;
+        let rc2L = (pL * (GL + 1) + PL) / GL;
+        let rc2R = (pR * (GR + 1) + PR) / GR;
+        if (!(rc2L > tiny)) {
+            rc2L = tiny;
+            pL = (tiny * GL - PL) / (GL + 1);
+        }
+        if (!(rc2R > tiny)) {
+            rc2R = tiny;
+            pR = (tiny * GR - PR) / (GR + 1);
+        }
+        const aL = Math.sqrt(rc2L / rhoL);
+        const aR = Math.sqrt(rc2R / rhoR);
+
+        // Wave speed estimates (Davis)
+        const SL = Math.min(uL - aL, uR - aR);
+        const SR = Math.max(uL + aL, uR + aR);
+
+        // Contact wave speed
+        const SStar = (pR - pL + rhoL * uL * (SL - uL) - rhoR * uR * (SR - uR)) /
+                      (rhoL * (SL - uL) - rhoR * (SR - uR));
+
+        if (SL >= 0) {
+            flux[fluxIdx] = rhoL * uL;
+            flux[fluxIdx + 1] = rhoL * uL * uL + pL;
+            flux[fluxIdx + 2] = uL * (EL + pL);
+            this._uFace = uL;
+        } else if (SStar >= 0) {
+            const pStar = pL + rhoL * (SL - uL) * (SStar - uL);
+            const rhoStarL = rhoL * (SL - uL) / (SL - SStar);
+            const EStarL = rhoStarL * (EL / rhoL + (SStar - uL) * (SStar + pL / (rhoL * (SL - uL))));
+
+            flux[fluxIdx] = rhoStarL * SStar;
+            flux[fluxIdx + 1] = rhoStarL * SStar * SStar + pStar;
+            flux[fluxIdx + 2] = SStar * (EStarL + pStar);
+            this._uFace = SStar;
+        } else if (SR >= 0) {
+            const pStar = pR + rhoR * (SR - uR) * (SStar - uR);
+            const rhoStarR = rhoR * (SR - uR) / (SR - SStar);
+            const EStarR = rhoStarR * (ER / rhoR + (SStar - uR) * (SStar + pR / (rhoR * (SR - uR))));
+
+            flux[fluxIdx] = rhoStarR * SStar;
+            flux[fluxIdx + 1] = rhoStarR * SStar * SStar + pStar;
+            flux[fluxIdx + 2] = SStar * (EStarR + pStar);
+            this._uFace = SStar;
+        } else {
+            flux[fluxIdx] = rhoR * uR;
+            flux[fluxIdx + 1] = rhoR * uR * uR + pR;
+            flux[fluxIdx + 2] = uR * (ER + pR);
+            this._uFace = uR;
+        }
+        this._upwind = SStar >= 0 ? 0 : 1;
+
+        return Math.max(Math.abs(SL), Math.abs(SR));
+    }
+
+    /**
+     * Compute fluxes at all cell interfaces from the current state this.U.
+     * Volume-fraction entries of the flux hold alpha_upwind * u_face; the
+     * non-conservative part of the advection is added in updateConservative.
+     */
+    computeFluxes() {
+        const U = this.U;
+        const nx = this.nx;
+        const nvar = this.nvar;
+        const M = this.numMaterials;
+        const G = this.eosG;
+        const P = this.eosP;
+        let maxWaveSpeed = 0;
+
+        if (this.interfaceMethod === 'mixed') {
+            this.updateEOS(U);
+        }
+
+        for (let i = 0; i <= nx; i++) {
+            const f = i * nvar;
+            let waveSpeed;
+
+            if (i === 0) {
+                // Left wall: mirror state with reversed velocity
+                waveSpeed = this.hllcFlux(U[0], -U[1], U[2], G[0], P[0],
+                                          U[0], U[1], U[2], G[0], P[0], f);
+            } else if (i === nx) {
+                // Right wall
+                const c = (nx - 1) * nvar;
+                waveSpeed = this.hllcFlux(U[c], U[c + 1], U[c + 2], G[nx - 1], P[nx - 1],
+                                          U[c], -U[c + 1], U[c + 2], G[nx - 1], P[nx - 1], f);
+            } else {
+                const l = (i - 1) * nvar;
+                const r = i * nvar;
+                waveSpeed = this.hllcFlux(U[l], U[l + 1], U[l + 2], G[i - 1], P[i - 1],
+                                          U[r], U[r + 1], U[r + 2], G[i], P[i], f);
+            }
+
+            const uFace = this._uFace;
+            this.faceVelocity[i] = uFace;
+
+            if (M > 0) {
+                // Upwind volume fractions (walls: the single interior cell)
+                const cell = i === 0 ? 0 : (i === nx ? nx - 1 : (this._upwind === 0 ? i - 1 : i));
+                const src = cell * nvar + 3;
+                for (let m = 0; m < M; m++) {
+                    this.flux[f + 3 + m] = U[src + m] * uFace;
+                }
+            }
+
+            if (waveSpeed > maxWaveSpeed) maxWaveSpeed = waveSpeed;
+        }
+
+        return maxWaveSpeed;
+    }
+
+    /**
+     * Forward-Euler update Uout = U - dt * dF/dx using the stored fluxes.
+     * Volume fractions obey the advection equation d(alpha)/dt + u d(alpha)/dx = 0,
+     * discretised as div(alpha*u) - alpha*div(u) with the same face velocities
+     * as the HLLC flux so that material interfaces stay free of pressure
+     * oscillations.
+     */
+    updateConservative(U, Uout, dt) {
+        const nvar = this.nvar;
+        const lambda = dt / this.dx;
+        const flux = this.flux;
+
+        for (let i = 0; i < this.nx; i++) {
+            const idx = i * nvar;
+            const fL = idx;
+            const fR = idx + nvar;
+
+            for (let k = 0; k < 3; k++) {
+                Uout[idx + k] = U[idx + k] - lambda * (flux[fR + k] - flux[fL + k]);
+            }
+
+            if (nvar > 3) {
+                const divU = this.faceVelocity[i + 1] - this.faceVelocity[i];
+                for (let k = 3; k < nvar; k++) {
+                    const alpha = U[idx + k];
+                    Uout[idx + k] = alpha - lambda * (flux[fR + k] - flux[fL + k] - alpha * divU);
+                }
+            }
+        }
+    }
+
+    /**
+     * Update per-cell gas properties after a completed time step
+     */
+    updateGasProperties() {
+        if (this.interfaceMethod === 'mixed') {
+            // Remove round-off drift: clamp to [0, 1] and renormalise
+            const nvar = this.nvar;
+            const M = this.numMaterials;
+            for (let i = 0; i < this.nx; i++) {
+                const base = i * nvar + 3;
+                let total = 0;
+                for (let m = 0; m < M; m++) {
+                    const alpha = Math.min(1, Math.max(0, this.U[base + m]));
+                    this.U[base + m] = alpha;
+                    total += alpha;
+                }
+                if (total > 1e-12) {
+                    for (let m = 0; m < M; m++) this.U[base + m] /= total;
+                } else {
+                    for (let m = 0; m < M; m++) this.U[base + m] = 1 / M;
+                }
+            }
+        }
+        this.updateEOS(this.U);
+    }
+
     /**
      * Update positions of Lagrangian tracers
      */
@@ -557,6 +498,7 @@ class EulerSolver {
             p: new Float64Array(this.p),        // Pressure
             T: new Float64Array(this.T),        // Temperature
             gamma: new Float64Array(this.gamma), // Specific heat ratio
+            pinf: new Float64Array(this.pinf),  // Stiffening pressure (0 for ideal gas)
             mw: new Float64Array(this.mw),      // Molecular weight
             gasId: Array.from(this.gasId)       // Gas identifier
         };
@@ -565,7 +507,9 @@ class EulerSolver {
         if (this.interfaceMethod === 'mixed' && this.materialFractions) {
             snapshot.materialFractions = new Float64Array(this.materialFractions);
             snapshot.numMaterials = this.numMaterials;
-            snapshot.materialProperties = this.materialProperties.map(prop => ({...prop}));
+            snapshot.materialProperties = this.materialProperties.map(prop => ({
+                gamma: prop.gamma, mw: prop.mw, pinf: prop.pinf, gasId: prop.gasId
+            }));
         }
         
         this.xtData.push(snapshot);
@@ -640,4 +584,8 @@ class EulerSolver {
             throw new Error(`Euler solver failed at t=${this.t.toFixed(6)}s after ${this.timeSteps} steps: ${error.message}`);
         }
     }
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { EulerSolver };
 }
