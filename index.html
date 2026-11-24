@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@400;600;700&display=swap" rel="stylesheet">
-<link href="css/app.css?v=2" rel="stylesheet">
+<link href="css/app.css?v=3" rel="stylesheet">
 </head>
 <body>
 
@@ -244,7 +244,7 @@
   <label>Time (ms) <input type="number" id="xtSimTime" value="20" min="0" step="any" inputmode="decimal"></label>
   <label title="50 to 5000. Run time grows with the square of this.">Grid cells <input type="number" id="xtGridPoints" value="500" min="50" max="5000" step="50" inputmode="numeric"></label>
   <label title="Time between stored frames; also the probe sampling interval">Snapshot interval (ms) <input type="number" id="xtSnapshotInterval" value="0.1" min="0" step="any" inputmode="decimal"></label>
-  <label title="Optional. Distances from the driver end wall, comma separated.">Probes (m) <input type="text" id="xtProbes" value="" placeholder="e.g. 4.5, 8.9" inputmode="decimal"></label>
+  <label title="Optional. Distances from the driver end wall, separated by commas or spaces.">Probes (m) <input type="text" id="xtProbes" value="" placeholder="e.g. 4.5 8.9" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
   <label title="Variable γ uses NASA polynomial specific heats with frozen composition; liquids keep the stiffened-gas model. About 1.5 times slower.">Gas model
     <select id="xtGasModel">
       <option value="constant" selected>Constant γ</option>
@@ -465,20 +465,20 @@ Submit issues &amp; feature requests on
 </div>
 
 <!-- Bump ?v= on every file when releasing, so browsers never mix cached and new scripts -->
-<script src="js/nasa9-data.js?v=2"></script>
-<script src="js/thermo.js?v=2"></script>
-<script src="js/gas-data.js?v=2"></script>
-<script src="js/shock-calc.js?v=2"></script>
-<script src="js/riemann-solver.js?v=2"></script>
-<script src="js/rmi-growth.js?v=2"></script>
-<script src="js/time-integrators.js?v=2"></script>
-<script src="js/euler-solver.js?v=2"></script>
-<script src="js/xt-visualization.js?v=2"></script>
-<script src="js/ui-common.js?v=2"></script>
-<script src="js/app-main.js?v=2"></script>
-<script src="js/app-rmi.js?v=2"></script>
-<script src="js/app-xt.js?v=2"></script>
-<script src="js/xt-export.js?v=2"></script>
+<script src="js/nasa9-data.js?v=3"></script>
+<script src="js/thermo.js?v=3"></script>
+<script src="js/gas-data.js?v=3"></script>
+<script src="js/shock-calc.js?v=3"></script>
+<script src="js/riemann-solver.js?v=3"></script>
+<script src="js/rmi-growth.js?v=3"></script>
+<script src="js/time-integrators.js?v=3"></script>
+<script src="js/euler-solver.js?v=3"></script>
+<script src="js/xt-visualization.js?v=3"></script>
+<script src="js/ui-common.js?v=3"></script>
+<script src="js/app-main.js?v=3"></script>
+<script src="js/app-rmi.js?v=3"></script>
+<script src="js/app-xt.js?v=3"></script>
+<script src="js/xt-export.js?v=3"></script>
 
 </body>
 </html>
