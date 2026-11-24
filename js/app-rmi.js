@@ -53,7 +53,7 @@ function calculateInterface() {
         set('heavyGasSound', formatSig(result.heavyGasPost.a));
 
         const notes = [];
-        if (!result.converged) {
+        if (result.converged === false) {
             notes.push({ type: 'warning', text: 'The Riemann solver did not fully converge; values are approximate.' });
         }
         if (!(result.interfaceVelocity > 0)) {
