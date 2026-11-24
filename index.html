@@ -71,7 +71,7 @@
     <input id="tid" type="number" step="any" data-quantity="temperature" data-si="300" inputmode="decimal">
     <span class="unit" data-unit="temperature"></span>
 
-    <label for="gasModel" title="Constant γ reproduces the original calculator. Variable γ uses NASA polynomial specific heats with frozen composition; liquids and the x-t solver always use constant γ.">Gas model</label>
+    <label for="gasModel" title="Constant γ reproduces the original calculator. Variable γ uses NASA polynomial specific heats with frozen composition; liquids always use the stiffened-gas model.">Gas model</label>
     <select id="gasModel">
       <option value="constant" selected>Constant γ</option>
       <option value="nasa">Variable γ (NASA)</option>
@@ -245,6 +245,12 @@
   <label title="50 to 5000. Run time grows with the square of this.">Grid cells <input type="number" id="xtGridPoints" value="500" min="50" max="5000" step="50" inputmode="numeric"></label>
   <label title="Time between stored frames; also the probe sampling interval">Snapshot interval (ms) <input type="number" id="xtSnapshotInterval" value="0.1" min="0" step="any" inputmode="decimal"></label>
   <label title="Optional. Distances from the driver end wall, comma separated.">Probes (m) <input type="text" id="xtProbes" value="" placeholder="e.g. 4.5, 8.9" inputmode="decimal"></label>
+  <label title="Variable γ uses NASA polynomial specific heats with frozen composition; liquids keep the stiffened-gas model. About 1.5 times slower.">Gas model
+    <select id="xtGasModel">
+      <option value="constant" selected>Constant γ</option>
+      <option value="nasa">Variable γ</option>
+    </select>
+  </label>
   <label>Integrator
     <select id="xtIntegrator">
       <option value="SSP" selected>SSP-RK3</option>

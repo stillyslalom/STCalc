@@ -126,3 +126,78 @@ test('sharp interface method refuses gas next to liquid', () => {
     const solver = new lib.EulerSolver({ nx: 50, interfaceMethod: 'sharp' });
     assert.throws(() => solver.initialize([slab(AIR, 1e5, 300, 1), slab(WATER, 1e5, 300, 1)]), /Mixed-Cell/);
 });
+
+/* ---- Temperature-dependent (tabulated) equations of state ---- */
+
+const comp = id => lib.gasComposition(lib.GAS_DATABASE[id]);
+const tslab = (gas, thermo, pressure, temperature, length, velocity) =>
+    ({ ...slab(gas, pressure, temperature, length, velocity), thermo });
+
+test('tabulated constant-cp gases reproduce the constant-gamma solver', () => {
+    const constant = id => [{ gamma: lib.GAS_DATABASE[id].gamma, mw: lib.GAS_DATABASE[id].mw, x: 1 }];
+    const options = { finalTime: 0.002 };
+    const a = run([slab(HELIUM, 4e5, 300, 3), slab(AIR, 101325, 300, 3)], options);
+    const b = run([tslab(HELIUM, constant('4'), 4e5, 300, 3), tslab(AIR, constant('1'), 101325, 300, 3)], options);
+    assert.equal(b.tabulated, true);
+    for (let i = 0; i < a.nx; i++) {
+        close(b.p[i], a.p[i], 1e-6, `p[${i}]`);
+        close(b.rho[i], a.rho[i], 1e-6, `rho[${i}]`);
+        close(b.T[i], a.T[i], 1e-6, `T[${i}]`);
+        assert.ok(Math.abs(b.u[i] - a.u[i]) < 1e-4, `u[${i}]`);
+    }
+});
+
+test('variable-gamma shock tube matches the 0D variable-gamma calculation', () => {
+    const air = { ...AIR, thermo: comp('1') }, he = { ...HELIUM, thermo: comp('4') };
+    const shock = lib.computeShockTube({ mach: 4, p1: 10000, t1: 300, t4: 300, driven: air, driver: he, variableGamma: true });
+    const tEnd = 0.0012;
+    const solver = run([tslab(HELIUM, he.thermo, shock.state4.p, 300, 3), tslab(AIR, air.thermo, 10000, 300, 3)],
+        { finalTime: tEnd, nx: 800 });
+
+    // Sample just behind the shock: the first-order scheme smears helium from
+    // the contact across much of the short shocked region
+    const xShock = 3 + shock.shockSpeed * tEnd;
+    const a = xShock - 0.12, b = xShock - 0.06;
+    close(mean(solver, 'p', a, b), shock.state2.p, 0.01, 'p2');
+    close(mean(solver, 'u', a, b), shock.state2.u, 0.01, 'u2');
+    close(mean(solver, 'T', a, b), shock.state2.T, 0.02, 'T2');
+    close(mean(solver, 'rho', a, b), shock.state2.rho, 0.02, 'rho2');
+    close(mean(solver, 'gamma', a, b), shock.state2.gamma, 0.01, 'gamma2');
+
+    // Constant gamma gives a clearly hotter post-shock state for the same shock
+    const constant = lib.computeShockTube({ mach: 4, p1: 10000, t1: 300, t4: 300, driven: AIR, driver: HELIUM });
+    assert.ok(mean(solver, 'T', a, b) < 0.97 * constant.state2.T);
+});
+
+test('moving interface between variable-gamma air and water stays uniform', () => {
+    const u0 = 50, p0 = 101325, tEnd = 0.0005;
+    const solver = run([tslab(AIR, comp('1'), p0, 293.15, 1.0025, u0), slab(WATER, p0, 293.15, 4.9975, u0)],
+        { finalTime: tEnd, nx: 600 });
+    for (let i = 0; i < solver.nx; i++) {
+        if (solver.x[i] < 1.0 || solver.x[i] > 1.3) continue;
+        assert.ok(Math.abs(solver.p[i] - p0) < 1e-7 * p0, `p[${i}] = ${solver.p[i]}`);
+        assert.ok(Math.abs(solver.u[i] - u0) < 1e-7 * u0, `u[${i}] = ${solver.u[i]}`);
+    }
+    close(mean(solver, 'T', 1.0, 1.02), 293.15, 1e-4, 'air temperature');
+});
+
+test('partial densities are conserved', () => {
+    const solver = run([tslab(HELIUM, comp('4'), 8e5, 300, 2), tslab(AIR, comp('1'), 101325, 300, 2), tslab(lib.GAS_DATABASE['8'], comp('8'), 101325, 300, 1)],
+        { finalTime: 0.004, nx: 300 });
+    const M = solver.numMaterials;
+    const expected = [8e5 / (lib.RU / 4.002602 * 300) * 2, null, null];
+    let total = 0;
+    const masses = new Array(M).fill(0);
+    for (let i = 0; i < solver.nx; i++) {
+        for (let m = 0; m < M; m++) masses[m] += solver.U[i * solver.nvar + 3 + M + m] * solver.dx;
+        total += solver.rho[i] * solver.dx;
+    }
+    close(masses[0], expected[0], 1e-9, 'helium mass');
+    close(masses[0] + masses[1] + masses[2], total, 1e-9, 'sum of partial masses');
+    for (let i = 0; i < solver.nx; i++) assert.ok(isFinite(solver.p[i]) && solver.p[i] > 0 && solver.T[i] > 0);
+});
+
+test('sharp interface method refuses variable-gamma slabs', () => {
+    const solver = new lib.EulerSolver({ nx: 50, interfaceMethod: 'sharp' });
+    assert.throws(() => solver.initialize([tslab(AIR, comp('1'), 1e5, 300, 1), slab(AIR, 1e5, 300, 1)]), /Mixed-Cell/);
+});

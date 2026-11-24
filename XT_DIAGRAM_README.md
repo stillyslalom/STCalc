@@ -19,22 +19,26 @@ A 1D multicomponent compressible Euler solver that runs in the browser and draws
 
 ### Equation of state
 
-Every material is a stiffened gas:
+Each slab has its own equation of state, and all materials in a cell share one pressure.
 
-```
-p = (γ − 1) ρ e − γ p∞        p + p∞ = ρ R T        a² = γ (p + p∞) / ρ
-```
+- **Constant γ** (default): a calorically perfect gas, or a stiffened gas for liquids:
 
-`p∞ = 0` gives a calorically perfect ideal gas. `p∞ > 0` models a stiff liquid; the built-in water uses γ = 6.12, p∞ = 343 MPa, with R chosen to give 998.2 kg/m³ at 293.15 K and 1 atm (sound speed 1450 m/s). The temperature of a liquid is only as meaningful as that fit.
+  ```
+  p = (γ − 1) ρ e − γ p∞        p + p∞ = ρ R T        a² = γ (p + p∞) / ρ
+  ```
+
+  `p∞ = 0` gives an ideal gas. The built-in water uses γ = 6.12, p∞ = 343 MPa, with R chosen to give 998.2 kg/m³ at 293.15 K and 1 atm (sound speed 1450 m/s). The temperature of a liquid is only as meaningful as that fit.
+
+- **Variable γ**: gases are ideal, `p = ρ R T`, with specific heats from NASA polynomial fits and frozen composition. The internal energy `e(T)` of each slab's gas is tabulated every 2 K. Liquids keep the stiffened-gas model. About 1.5 times slower.
 
 ### Interfaces
 
-- **Mixed cell** (default): a volume fraction per slab is advected with the flow, and `1/(γ−1)` and `γp∞/(γ−1)` are volume-averaged in mixed cells. The fractions are advanced inside the Runge–Kutta stages using the HLLC contact velocity, which keeps pressure and velocity uniform across a moving material interface. This is required for gas–liquid interfaces.
+- **Mixed cell** (default): a volume fraction per slab is advected with the flow using the HLLC contact velocity, inside the Runge–Kutta stages, which keeps pressure and velocity uniform across a moving material interface. With constant γ, `1/(γ−1)` and `γp∞/(γ−1)` are volume-averaged in mixed cells. With variable γ, each slab's partial density is also carried, so every material has its own density and temperature in a mixed cell, and the shared pressure is found by Newton iteration. Required for gas–liquid interfaces and for variable γ.
 - **Sharp**: each cell takes the properties of the region between tracers. Faster, but not conservative at interfaces (about 1% error in wave strengths) and limited to slabs with the same p∞.
 
 ### Limits
 
-- Constant γ, even when the shock tube calculator is set to variable γ: no vibrational excitation, dissociation, or phase change (no cavitation).
+- Frozen composition: no dissociation, ionization, reaction or phase change (no cavitation). With constant γ there is no vibrational excitation either.
 - Inviscid and one-dimensional: no boundary layers, diaphragm opening or area changes.
 - First-order accuracy smears shocks over a few cells and contacts over more; increase the grid cells to sharpen them.
 
@@ -48,4 +52,4 @@ p = (γ − 1) ρ e − γ p∞        p + p∞ = ρ R T        a² = γ (p + p�
 
 ## Validation
 
-`npm test` checks the solver against exact Riemann solutions (helium/air shock tube, air shock reflecting from water) and checks that a moving air/water interface stays at uniform pressure and velocity.
+`npm test` checks the solver against exact Riemann solutions (helium/air shock tube, air shock reflecting from water), checks the variable-γ solver against the variable-γ shock tube calculation, and checks that a moving air/water interface stays at uniform pressure and velocity with either gas model.

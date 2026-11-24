@@ -21,7 +21,8 @@ class EulerSolver {
         // State buffers are allocated in initialize(), once the number of
         // materials (and therefore variables per cell) is known.
         // Layout per cell: [rho, rho*u, E, alpha_0 ... alpha_{M-1}]
-        // (volume fractions are only carried by the mixed-cell method)
+        // (volume fractions are only carried by the mixed-cell method), plus
+        // partial densities alpha_m * rho_m when any material is tabulated
         this.nvar = 3;
         this.U = null;   // Current state
         this.Un = null;  // Storage buffer
@@ -43,6 +44,14 @@ class EulerSolver {
         // with G = 1/(gamma-1) and P = gamma*pinf/(gamma-1)
         this.eosG = new Float64Array(this.nx);
         this.eosP = new Float64Array(this.nx);
+
+        // Cell pressure and rho*a^2 for the current flux evaluation
+        this.pc = new Float64Array(this.nx);
+        this.rc2 = new Float64Array(this.nx);
+
+        // True when any material has a tabulated (temperature-dependent)
+        // equation of state; partial densities are then carried per material
+        this.tabulated = false;
 
         // Face arrays
         this.flux = null;
@@ -75,7 +84,9 @@ class EulerSolver {
 
     /**
      * Initialize the shock tube with gas slabs
-     * @param {Array} slabs - Array of {gasId, gamma, mw, pinf, pressure, temperature, length, velocity}
+     * @param {Array} slabs - Array of {gasId, gamma, mw, pinf, pressure, temperature, length, velocity}.
+     *   A slab may also carry thermo: a composition for makeThermo() (thermo.js);
+     *   its specific heats then depend on temperature.
      */
     initialize(slabs) {
         const mixed = this.interfaceMethod === 'mixed';
@@ -86,17 +97,28 @@ class EulerSolver {
             gasId: slab.gasId,
             G: 1 / (slab.gamma - 1),
             P: slab.gamma * (slab.pinf || 0) / (slab.gamma - 1),
-            R: this.Ru / slab.mw
+            R: this.Ru / slab.mw,
+            table: null
         }));
 
         if (!mixed && materials.some(m => m.pinf !== materials[0].pinf)) {
             throw new Error('Slabs with different stiffening pressures (e.g. gas next to liquid) require the Mixed-Cell interface method.');
         }
 
+        slabs.forEach((slab, s) => {
+            if (!slab.thermo || materials[s].pinf > 0) return;
+            if (!mixed) throw new Error('Temperature-dependent gas properties require the Mixed-Cell interface method.');
+            const th = makeThermo(slab.thermo);
+            materials[s].R = th.R;
+            materials[s].mw = th.mw;
+            materials[s].table = EulerSolver.energyTable(th);
+            this.tabulated = true;
+        });
+
         this.materialProperties = materials;
         this.regions = materials;
         this.numMaterials = mixed ? slabs.length : 0;
-        this.nvar = 3 + this.numMaterials;
+        this.nvar = 3 + this.numMaterials * (this.tabulated ? 2 : 1);
 
         const n = this.nx * this.nvar;
         this.U = new Float64Array(n);
@@ -136,11 +158,18 @@ class EulerSolver {
                     const uS = slabs[s].velocity || 0;
                     rho += alpha * rhoS;
                     mom += alpha * rhoS * uS;
-                    internal += alpha * (mat.G * slabs[s].pressure + mat.P);
+                    internal += alpha * (mat.table
+                        ? rhoS * EulerSolver.tableEnergy(mat.table, slabs[s].temperature)
+                        : mat.G * slabs[s].pressure + mat.P);
                     total += alpha;
+                    if (this.tabulated) this.U[idx + 3 + slabs.length + s] = alpha * rhoS;
                 }
                 // Guard against round-off at the domain end
-                for (let s = 0; s < slabs.length; s++) this.U[idx + 3 + s] /= total;
+                for (let s = 0; s < slabs.length; s++) {
+                    this.U[idx + 3 + s] /= total;
+                    if (this.tabulated) this.U[idx + 3 + slabs.length + s] /= total;
+                }
+                this.pc[i] = slabs.reduce((sum, slab, s) => sum + this.U[idx + 3 + s] * slab.pressure, 0);
                 this.U[idx] = rho / total;
                 this.U[idx + 1] = mom / total;
                 this.U[idx + 2] = internal / total + 0.5 * mom * mom / (rho * total);
@@ -177,7 +206,9 @@ class EulerSolver {
      */
     updateEOS(U) {
         const nvar = this.nvar;
-        if (this.interfaceMethod === 'mixed') {
+        if (this.tabulated) {
+            this.closeTabulated(U);
+        } else if (this.interfaceMethod === 'mixed') {
             const M = this.numMaterials;
             const mats = this.materialProperties;
             for (let i = 0; i < this.nx; i++) {
@@ -212,6 +243,104 @@ class EulerSolver {
     }
 
     /**
+     * Specific internal energy e(T) of a thermally perfect gas, tabulated on a
+     * uniform temperature grid and interpolated linearly. e(0) = 0, as for a
+     * constant-gamma gas. A piecewise-linear e makes the pressure solve cheap
+     * and exactly invertible.
+     */
+    static energyTable(th) {
+        const dT = 2, n = 12001;                  // 0 to 24000 K
+        const e = new Float64Array(n);
+        // Integrate cv with the midpoint rule; cp is held constant below the fitted range
+        for (let j = 1; j < n; j++) {
+            e[j] = e[j - 1] + (th.cp((j - 0.5) * dT) - th.R) * dT;
+        }
+        return { dT, n, e };
+    }
+
+    static tableEnergy(table, T) {
+        const x = T / table.dT;
+        const j = Math.min(table.n - 2, Math.max(0, Math.floor(x)));
+        return table.e[j] + (table.e[j + 1] - table.e[j]) * (x - j);
+    }
+
+    /** cv(T), the slope of the tabulated energy. */
+    static tableCv(table, T) {
+        const j = Math.min(table.n - 2, Math.max(0, Math.floor(T / table.dT)));
+        return (table.e[j + 1] - table.e[j]) / table.dT;
+    }
+
+    /**
+     * Pressure closure when materials have tabulated equations of state.
+     * Each material k occupies a volume fraction alpha_k at its own density
+     * rho_k and temperature, and all share one pressure p, found from
+     *
+     *     sum_k alpha_k * eps_k(p, rho_k) = rho * e
+     *
+     * where eps_k is internal energy per unit volume: G_k p + P_k for a
+     * constant-gamma or stiffened material, rho_k e_k(p / (rho_k R_k)) for a
+     * tabulated one. Fills pc, rc2 and the effective eosG, eosP.
+     */
+    closeTabulated(U) {
+        const nvar = this.nvar;
+        const M = this.numMaterials;
+        const mats = this.materialProperties;
+        const tiny = 1e-10;
+
+        for (let i = 0; i < this.nx; i++) {
+            const idx = i * nvar;
+            const rho = Math.max(U[idx], tiny);
+            const u = U[idx + 1] / rho;
+            const target = U[idx + 2] - 0.5 * rho * u * u;
+
+            // Lowest admissible pressure for the materials present
+            let floor = -Infinity;
+            for (let m = 0; m < M; m++) {
+                if (U[idx + 3 + m] > 1e-12) floor = Math.max(floor, -mats[m].pinf);
+            }
+            floor += tiny;
+
+            let p = Math.max(this.pc[i], floor);
+            let xi = 1, stiff = 0;
+            for (let iter = 0; iter < 40; iter++) {
+                let energy = 0;
+                xi = 0;
+                stiff = 0;
+                for (let m = 0; m < M; m++) {
+                    const alpha = U[idx + 3 + m];
+                    if (!(alpha > 1e-12)) continue;
+                    const mat = mats[m];
+                    const mass = U[idx + 3 + M + m];
+                    if (mat.table && mass > 0) {
+                        const rhoK = mass / alpha;
+                        const T = p / (rhoK * mat.R);
+                        energy += mass * EulerSolver.tableEnergy(mat.table, T);
+                        xi += alpha * EulerSolver.tableCv(mat.table, T) / mat.R;
+                    } else {
+                        energy += alpha * (mat.G * p + mat.P);
+                        xi += alpha * mat.G;
+                        stiff += alpha * mat.P;
+                    }
+                }
+                if (!(xi > 0)) break;
+                let next = p - (energy - target) / xi;
+                if (!(next > floor)) next = 0.5 * (p + floor);
+                const done = Math.abs(next - p) <= 1e-12 * Math.abs(p) + 1e-9;
+                p = next;
+                if (done) break;
+            }
+
+            this.pc[i] = p;
+            this.eosG[i] = xi;
+            this.eosP[i] = stiff;
+            // Mixture sound speed: rho a^2 = [p * sum alpha (xi_k + 1) + sum alpha P_k] / xi
+            let alphaSum = 0;
+            for (let m = 0; m < M; m++) if (U[idx + 3 + m] > 1e-12) alphaSum += U[idx + 3 + m];
+            this.rc2[i] = Math.max((p * (xi + alphaSum) + stiff) / xi, tiny);
+        }
+    }
+
+    /**
      * Convert conservative to primitive variables
      */
     updatePrimitives() {
@@ -231,6 +360,7 @@ class EulerSolver {
             let p = (this.U[idx + 2] - 0.5 * rho * u * u - P) / G;
             const pFloor = -pinf + minDensity;
             if (!(p > pFloor)) p = pFloor;
+            if (this.tabulated) p = this.pc[i];   // from closeTabulated
 
             this.rho[i] = rho;
             this.u[i] = u;
@@ -246,6 +376,7 @@ class EulerSolver {
                 for (let m = 0; m < M; m++) {
                     const alpha = Math.min(1, Math.max(0, this.U[idx + 3 + m]));
                     this.materialFractions[i * M + m] = alpha;
+                    // alpha_k * rho_k * T_k: each material is at its own temperature
                     sum += alpha * (p + mats[m].pinf) / mats[m].R;
                     mw += alpha * mats[m].mw;
                     total += alpha;
@@ -277,13 +408,14 @@ class EulerSolver {
     }
 
     /**
-     * HLLC flux between a left and a right state.
+     * HLLC flux between a left and a right state, each given by its
+     * conservative variables, pressure and rho*a^2.
      * Writes the conservative flux to this.flux at offset fluxIdx and returns
      * the largest wave speed. The velocity of the Riemann solution at the face
      * is left in this._uFace and the upwind side (0 = left, 1 = right) of the
      * contact in this._upwind; both are needed to advect volume fractions.
      */
-    hllcFlux(rhoL, momL, EL, GL, PL, rhoR, momR, ER, GR, PR, fluxIdx) {
+    hllcFlux(rhoL, momL, EL, pL, rc2L, rhoR, momR, ER, pR, rc2R, fluxIdx) {
         const tiny = 1e-10;
         const flux = this.flux;
 
@@ -291,20 +423,6 @@ class EulerSolver {
         rhoR = Math.max(rhoR, tiny);
         const uL = momL / rhoL;
         const uR = momR / rhoR;
-
-        // Pressure and rho*a^2 = gamma*(p + pinf) = (p*(G+1) + P)/G
-        let pL = (EL - 0.5 * rhoL * uL * uL - PL) / GL;
-        let pR = (ER - 0.5 * rhoR * uR * uR - PR) / GR;
-        let rc2L = (pL * (GL + 1) + PL) / GL;
-        let rc2R = (pR * (GR + 1) + PR) / GR;
-        if (!(rc2L > tiny)) {
-            rc2L = tiny;
-            pL = (tiny * GL - PL) / (GL + 1);
-        }
-        if (!(rc2R > tiny)) {
-            rc2R = tiny;
-            pR = (tiny * GR - PR) / (GR + 1);
-        }
         const aL = Math.sqrt(rc2L / rhoL);
         const aR = Math.sqrt(rc2R / rhoR);
 
@@ -360,12 +478,28 @@ class EulerSolver {
         const nx = this.nx;
         const nvar = this.nvar;
         const M = this.numMaterials;
-        const G = this.eosG;
-        const P = this.eosP;
+        const p = this.pc;
+        const rc2 = this.rc2;
+        const tiny = 1e-10;
         let maxWaveSpeed = 0;
 
         if (this.interfaceMethod === 'mixed') {
             this.updateEOS(U);
+        }
+        if (!this.tabulated) {
+            // Pressure and rho*a^2 = gamma*(p + pinf) = (p*(G+1) + P)/G
+            const G = this.eosG, P = this.eosP;
+            for (let i = 0; i < nx; i++) {
+                const c = i * nvar;
+                const rho = Math.max(U[c], tiny);
+                const u = U[c + 1] / rho;
+                p[i] = (U[c + 2] - 0.5 * rho * u * u - P[i]) / G[i];
+                rc2[i] = (p[i] * (G[i] + 1) + P[i]) / G[i];
+                if (!(rc2[i] > tiny)) {
+                    rc2[i] = tiny;
+                    p[i] = (tiny * G[i] - P[i]) / (G[i] + 1);
+                }
+            }
         }
 
         for (let i = 0; i <= nx; i++) {
@@ -374,18 +508,18 @@ class EulerSolver {
 
             if (i === 0) {
                 // Left wall: mirror state with reversed velocity
-                waveSpeed = this.hllcFlux(U[0], -U[1], U[2], G[0], P[0],
-                                          U[0], U[1], U[2], G[0], P[0], f);
+                waveSpeed = this.hllcFlux(U[0], -U[1], U[2], p[0], rc2[0],
+                                          U[0], U[1], U[2], p[0], rc2[0], f);
             } else if (i === nx) {
                 // Right wall
                 const c = (nx - 1) * nvar;
-                waveSpeed = this.hllcFlux(U[c], U[c + 1], U[c + 2], G[nx - 1], P[nx - 1],
-                                          U[c], -U[c + 1], U[c + 2], G[nx - 1], P[nx - 1], f);
+                waveSpeed = this.hllcFlux(U[c], U[c + 1], U[c + 2], p[nx - 1], rc2[nx - 1],
+                                          U[c], -U[c + 1], U[c + 2], p[nx - 1], rc2[nx - 1], f);
             } else {
                 const l = (i - 1) * nvar;
                 const r = i * nvar;
-                waveSpeed = this.hllcFlux(U[l], U[l + 1], U[l + 2], G[i - 1], P[i - 1],
-                                          U[r], U[r + 1], U[r + 2], G[i], P[i], f);
+                waveSpeed = this.hllcFlux(U[l], U[l + 1], U[l + 2], p[i - 1], rc2[i - 1],
+                                          U[r], U[r + 1], U[r + 2], p[i], rc2[i], f);
             }
 
             const uFace = this._uFace;
@@ -397,6 +531,14 @@ class EulerSolver {
                 const src = cell * nvar + 3;
                 for (let m = 0; m < M; m++) {
                     this.flux[f + 3 + m] = U[src + m] * uFace;
+                }
+                if (this.tabulated) {
+                    // Partial densities ride on the mass flux with the upwind mass fraction
+                    const massFlux = this.flux[f];
+                    const rhoUp = Math.max(U[cell * nvar], tiny);
+                    for (let m = 0; m < M; m++) {
+                        this.flux[f + 3 + M + m] = massFlux * U[src + M + m] / rhoUp;
+                    }
                 }
             }
 
@@ -428,10 +570,15 @@ class EulerSolver {
             }
 
             if (nvar > 3) {
+                const lastAlpha = 3 + this.numMaterials;
                 const divU = this.faceVelocity[i + 1] - this.faceVelocity[i];
-                for (let k = 3; k < nvar; k++) {
+                for (let k = 3; k < lastAlpha; k++) {
                     const alpha = U[idx + k];
                     Uout[idx + k] = alpha - lambda * (flux[fR + k] - flux[fL + k] - alpha * divU);
+                }
+                // Partial densities are conserved
+                for (let k = lastAlpha; k < nvar; k++) {
+                    Uout[idx + k] = U[idx + k] - lambda * (flux[fR + k] - flux[fL + k]);
                 }
             }
         }
@@ -457,6 +604,11 @@ class EulerSolver {
                     for (let m = 0; m < M; m++) this.U[base + m] /= total;
                 } else {
                     for (let m = 0; m < M; m++) this.U[base + m] = 1 / M;
+                }
+                if (this.tabulated) {
+                    for (let m = 0; m < M; m++) {
+                        if (this.U[base + M + m] < 0) this.U[base + M + m] = 0;
+                    }
                 }
             }
         }

@@ -114,6 +114,8 @@ function importShockIntoXT() {
     addXTSlab(driver);
     addXTSlab(driven);
     xtSlabs = xtSlabs.concat(rest);
+    // Use the gas model the driver pressure was calculated with
+    byId('xtGasModel').value = appState.shockInputs.variableGamma ? 'nasa' : 'constant';
     renderXTSlabs();
     return true;
 }
@@ -126,11 +128,15 @@ function updateInterfaceMethodInfo() {
         hasLiquidInterface = pinfs.some(function (p) { return p !== pinfs[0]; });
     } catch (e) { /* incomplete configuration: decided when the simulation is run */ }
 
-    if (hasLiquidInterface) select.value = 'mixed';
-    select.options[1].disabled = hasLiquidInterface;
+    const variableGamma = byId('xtGasModel').value === 'nasa';
+    const needsMixed = hasLiquidInterface || variableGamma;
+    if (needsMixed) select.value = 'mixed';
+    select.options[1].disabled = needsMixed;
     byId('xtInterfaceMethodLabel').title = hasLiquidInterface
         ? 'Mixed cell is required for gas–liquid interfaces.'
-        : 'Mixed cell is conservative. Sharp is faster but about 1% off in wave strengths.';
+        : (variableGamma
+            ? 'Mixed cell is required for the variable-γ gas model.'
+            : 'Mixed cell is conservative. Sharp is faster but about 1% off in wave strengths.');
 }
 
 /* ------------------------------------------------------------------ */
@@ -142,6 +148,7 @@ function readXTConfiguration() {
     clearInvalid(tool);
     if (xtSlabs.length === 0) throw userError('Add at least one slab.');
 
+    const variableGamma = byId('xtGasModel').value === 'nasa';
     const slabs = xtSlabs.map(function (slab, index) {
         const n = index + 1;
         const inputs = byId('xtSlabList').children[index].querySelectorAll('input[type="number"]');
@@ -151,6 +158,7 @@ function readXTConfiguration() {
         if (!(slab.length > 0)) throw new FieldError(inputs[2], 'Slab ' + n + ': length must be a positive number.');
         return {
             gasId: props.name, gamma: props.gamma, mw: props.mw, pinf: props.pinf,
+            thermo: variableGamma && !(props.pinf > 0) ? props.thermo : null,
             pressure: slab.pressure, temperature: slab.temperature, length: slab.length
         };
     });
@@ -168,6 +176,7 @@ function readXTConfiguration() {
     return {
         slabs: slabs,
         probes: probes,
+        gasModel: variableGamma ? 'nasa' : 'constant',
         nx: Math.round(readNumber(byId('xtGridPoints'), 'Grid cells', { min: 50, max: 5000 })),
         finalTime: readNumber(byId('xtSimTime'), 'Simulated time', { positive: true }) / 1000,
         xtInterval: readNumber(byId('xtSnapshotInterval'), 'Snapshot interval', { positive: true }) / 1000,
@@ -485,6 +494,7 @@ document.addEventListener('DOMContentLoaded', function () {
         renderXTSlabs();
     });
     byId('xtInterfaceMethod').addEventListener('change', updateInterfaceMethodInfo);
+    byId('xtGasModel').addEventListener('change', updateInterfaceMethodInfo);
     byId('xtIntegrator').addEventListener('change', function () {
         byId('xtCflNumber').value = byId('xtIntegrator').value === 'SSP' ? 0.8 : 0.4;
     });
