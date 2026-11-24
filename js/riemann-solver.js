@@ -99,8 +99,41 @@ function solveExactRiemann(leftState, rightState, ru = 8314.51) {
         leftPost: calculatePostWaveState(L, pStar, uStar, waveConfig.left),
         rightPost: calculatePostWaveState(R, pStar, uStar, waveConfig.right),
         waveConfig,
-        converged
+        converged,
+        left: L,
+        right: R
     };
+}
+
+/**
+ * State of an exact Riemann solution along the ray x/t = xi.
+ * @param {Object} solution - result of solveExactRiemann
+ * @param {number} xi - similarity coordinate (m/s), measured from the initial discontinuity
+ * @returns {{rho:number, u:number, p:number, side:number}} side is 0 left of
+ *   the contact (left material) and 1 right of it
+ */
+function sampleExactRiemann(solution, xi) {
+    const left = xi < solution.uStar;
+    const s = left ? solution.left : solution.right;
+    const post = left ? solution.leftPost : solution.rightPost;
+    const sign = left ? -1 : 1;                 // direction the wave travels
+    const isShock = (left ? solution.waveConfig.left : solution.waveConfig.right) === 'shock';
+    const g = s.gamma;
+    const side = left ? 0 : 1;
+    const rel = sign * (xi - s.u);              // ray speed relative to the undisturbed gas, along the wave direction
+
+    if (isShock) {
+        const ratio = (solution.pStar + s.pinf) / s.pt;
+        const speed = s.a * Math.sqrt((g + 1) / (2 * g) * ratio + (g - 1) / (2 * g));
+        return rel > speed ? { rho: s.rho, u: s.u, p: s.p, side } : { rho: post.rho, u: post.u, p: post.p, side };
+    }
+    if (rel >= s.a) return { rho: s.rho, u: s.u, p: s.p, side };                       // ahead of the fan
+    if (sign * (xi - post.u) <= post.a) return { rho: post.rho, u: post.u, p: post.p, side };   // behind it
+    // Inside the fan: u -/+ a = xi and the Riemann invariant of the other family is constant
+    const a = (2 * s.a + (g - 1) * rel) / (g + 1);
+    const u = xi - sign * a;
+    const x = a / s.a;
+    return { rho: s.rho * Math.pow(x, 2 / (g - 1)), u: u, p: s.pt * Math.pow(x, 2 * g / (g - 1)) - s.pinf, side };
 }
 
 /**
@@ -205,6 +238,7 @@ function solveShockedInterface(shockedLightState, ambientHeavyState, ru = 8314.5
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         solveExactRiemann,
+        sampleExactRiemann,
         calculateAtwoodNumber,
         solveShockedInterface
     };

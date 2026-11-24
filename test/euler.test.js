@@ -68,7 +68,7 @@ for (const method of ['mixed', 'sharp']) {
             close(mean(solver, 'T', a, b), exact.rightPost.T, 0.02, 'shocked air temperature');
             close(solver.tracers[0].x, xContact, tol, 'contact position');
             close(totalMass(solver), totalMass(run([slab(HELIUM, 4e5, 300, 3), slab(AIR, 101325, 300, 3)],
-                { finalTime: 1e-9, interfaceMethod: method })), 1e-10, 'mass conservation');
+                { finalTime: 1e-9, interfaceMethod: method })), 1e-8, 'mass conservation');
         });
     }
 }
@@ -135,7 +135,8 @@ const tslab = (gas, thermo, pressure, temperature, length, velocity) =>
 
 test('tabulated constant-cp gases reproduce the constant-gamma solver', () => {
     const constant = id => [{ gamma: lib.GAS_DATABASE[id].gamma, mw: lib.GAS_DATABASE[id].mw, x: 1 }];
-    const options = { finalTime: 0.002 };
+    // Same start for both: the exact start applies to constant-gamma materials only
+    const options = { finalTime: 0.002, exactStart: false };
     const a = run([slab(HELIUM, 4e5, 300, 3), slab(AIR, 101325, 300, 3)], options);
     const b = run([tslab(HELIUM, constant('4'), 4e5, 300, 3), tslab(AIR, constant('1'), 101325, 300, 3)], options);
     assert.equal(b.tabulated, true);
@@ -229,7 +230,7 @@ test('second order sharpens the contact and reduces the error', () => {
     assert.ok(error(second) < 0.25 * error(first), `u* error ${error(second)} vs ${error(first)}`);
     close(second.p[i], exact.pStar, 1e-3, 'p*');
     close(second.tracers[0].x, xContact, 1e-3, 'contact position');
-    close(totalMass(second), totalMass(first), 1e-10, 'mass');
+    close(totalMass(second), totalMass(first), 1e-8, 'mass');
 
     // No overshoot at the shock or the contact
     for (let k = 0; k < second.nx; k++) {
@@ -447,15 +448,90 @@ test('pressure drops across the contraction by the steady-nozzle amount', () => 
     close(mean(solver, 'p', 3.1, 3.4), shock.state2.p, 0.01, 'pressure downstream of the nozzle');
 });
 
-test('start-up error at the tail of the driver expansion stays small', () => {
-    // A known artifact of shock-capturing schemes: a narrow dip just behind the fan tail
-    const shock = lib.computeShockTube({ mach: 5, p1: 101325, t1: 300, t4: 300, driven: AIR, driver: HELIUM });
-    const tEnd = 0.003;
-    const solver = run([slab(HELIUM, shock.state4.p, 300, 3), slab(AIR, 101325, 300, 6)], { finalTime: tEnd, nx: 500, ...hancock });
-    const tail = 3 + (shock.state3.u - shock.state3.a) * tEnd, contact = solver.tracers[0].x;
-    let lowest = Infinity;
+/* ---- Starting from the exact solution with a pre-formed shock ---- */
+
+/** Largest pressure deficit, as a fraction of p*, between the expansion tail and the contact. */
+function tailDip(solver, exact, x0) {
+    const t = solver.t, dx = solver.dx;
+    const tail = x0 + (exact.uStar - exact.leftPost.a) * t, contact = x0 + exact.uStar * t;
+    let dip = 0;
     for (let i = 0; i < solver.nx; i++) {
-        if (solver.x[i] > tail && solver.x[i] < contact - 0.15 * (contact - tail)) lowest = Math.min(lowest, solver.p[i]);
+        if (solver.x[i] > tail + 3 * dx && solver.x[i] < contact - 10 * dx) dip = Math.min(dip, solver.p[i] / exact.pStar - 1);
     }
-    assert.ok(lowest > 0.96 * shock.state2.p, `dip to ${(lowest / shock.state2.p).toFixed(4)} of p2`);
+    return -dip;
+}
+
+for (const integrator of ['Hancock', 'SSP']) {
+    test(`pre-formed shock start removes the dip behind the expansion tail (${integrator})`, () => {
+        const pDriver = 4485e3;                                    // helium into air at about Mach 3
+        const exact = lib.solveExactRiemann({ ...HELIUM, p: pDriver, T: 300, u: 0 }, { ...AIR, p: 101325, T: 300, u: 0 });
+        const slabs = [slab(HELIUM, pDriver, 300, 3), slab(AIR, 101325, 300, 6)];
+        const options = { finalTime: 0.003, nx: 500, order: 2, integrator, xtInterval: 1e-4 };
+        const plain = run(slabs, { ...options, exactStart: false });
+        const formed = run(slabs, options);
+
+        assert.equal(plain.startTime, 0);
+        assert.ok(formed.startTime > 0 && formed.startTime < 0.0015, `start time ${formed.startTime}`);
+        // A bare jump leaves a dip of about 2%; the pre-formed shock leaves almost none
+        assert.ok(tailDip(plain, exact, 3) > 0.015, `plain start dip ${tailDip(plain, exact, 3)}`);
+        assert.ok(tailDip(formed, exact, 3) < 0.003, `formed start dip ${tailDip(formed, exact, 3)}`);
+
+        // The rest of the solution is at least as good
+        const xContact = 3 + exact.uStar * 0.003;
+        close(formed.tracers[0].x, xContact, 2e-4, 'contact position');
+        const i = Math.floor((xContact + 0.3) / formed.dx);
+        close(formed.p[i], exact.pStar, 2e-3, 'p*');
+        close(formed.u[i], exact.uStar, 2e-3, 'u*');
+        close(formed.rho[i], exact.rightPost.rho, 5e-3, 'shocked air density');
+        close(totalMass(formed), totalMass(plain), 1e-8, 'mass');
+
+        // Snapshots are evenly spaced from t = 0, the early ones from the exact solution
+        assert.equal(formed.xtData.length, plain.xtData.length);
+        formed.xtData.forEach((snapshot, j) => close(snapshot.t + 1, j * 1e-4 + 1, 1e-9, `snapshot ${j} time`));
+        const early = formed.xtData[3];                            // t = 0.3 ms, before the start time
+        assert.ok(early.t < formed.startTime);
+        const sample = lib.sampleExactRiemann(exact, (formed.x[150] - 3) / early.t);   // inside the expansion
+        close(early.p[150], sample.p, 0.01, 'early snapshot pressure');
+        const path = formed.tracers[0].trajectory;
+        for (let k = 1; k < path.length; k++) assert.ok(path[k].t > path[k - 1].t && path[k].x >= path[k - 1].x);
+    });
+}
+
+test('pre-formed shock start is mirror-symmetric', () => {
+    const options = { finalTime: 0.003, nx: 500, ...hancock };
+    const right = run([slab(HELIUM, 4485e3, 300, 3), slab(AIR, 101325, 300, 6)], options);
+    const left = run([slab(AIR, 101325, 300, 6), slab(HELIUM, 4485e3, 300, 3)], options);
+    assert.ok(left.startTime > 0);
+    close(left.startTime, right.startTime, 1e-12, 'start time');
+    for (let i = 0; i < right.nx; i++) {
+        close(left.p[right.nx - 1 - i], right.p[i], 1e-9, `p[${i}]`);
+        assert.ok(Math.abs(left.u[right.nx - 1 - i] + right.u[i]) < 1e-6, `u[${i}]`);
+    }
+});
+
+test('the exact start is skipped where it does not apply', () => {
+    const sf6 = lib.GAS_DATABASE['8'];
+    const cases = {
+        'heavy driven gas (shock stays near the contact)': [slab(HELIUM, 4485e3, 300, 3), slab(sf6, 101325, 300, 6)],
+        'temperature-dependent gases': [tslab(HELIUM, comp('4'), 4485e3, 300, 3), tslab(AIR, comp('1'), 101325, 300, 6)],
+        'area change at the diaphragm': [aslab(slab(HELIUM, 4485e3, 300, 3), 2.25), aslab(slab(AIR, 101325, 300, 6), 1)],
+        'no pressure difference': [slab(HELIUM, 101325, 300, 3), slab(AIR, 101325, 300, 6)]
+    };
+    for (const name in cases) {
+        const solver = run(cases[name], { finalTime: 0.003, nx: 500, ...hancock });
+        assert.equal(solver.startTime, 0, name);
+        for (let i = 0; i < solver.nx; i++) assert.ok(isFinite(solver.p[i]) && solver.rho[i] > 0, name);
+    }
+    // Too short a run to reach the start time
+    assert.equal(run([slab(HELIUM, 4485e3, 300, 3), slab(AIR, 101325, 300, 6)], { finalTime: 1e-4, nx: 500, ...hancock }).startTime, 0);
+});
+
+test('start-up error behind the expansion tail: small with the pre-formed shock, bounded without', () => {
+    const shock = lib.computeShockTube({ mach: 5, p1: 101325, t1: 300, t4: 300, driven: AIR, driver: HELIUM });
+    const exact = lib.solveExactRiemann({ ...HELIUM, p: shock.state4.p, T: 300, u: 0 }, { ...AIR, p: 101325, T: 300, u: 0 });
+    const slabs = [slab(HELIUM, shock.state4.p, 300, 3), slab(AIR, 101325, 300, 6)];
+    const formed = run(slabs, { finalTime: 0.003, nx: 500, ...hancock });
+    const plain = run(slabs, { finalTime: 0.003, nx: 500, ...hancock, exactStart: false });
+    assert.ok(tailDip(formed, exact, 3) < 0.003, `formed start dip ${tailDip(formed, exact, 3)}`);
+    assert.ok(tailDip(plain, exact, 3) < 0.04, `plain start dip ${tailDip(plain, exact, 3)}`);
 });

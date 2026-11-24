@@ -20,6 +20,18 @@ A 1D multicomponent compressible Euler solver that runs in the browser and draws
 - Varying cross-section: where neighboring slabs have different areas the flow is solved as quasi-one-dimensional, `∂(AU)/∂t + ∂(AF)/∂x = [0, p ∂A/∂x, 0]`. The area changes linearly over a transition inside the wider slab that ends at the slab boundary (4% of the tube length, at least 8 cells). Gas at rest stays exactly at rest. An abrupt one-cell step would lose 5–10% of the shock strength numerically, which is why the change is spread out.
 - Lagrangian tracers follow each initial interface and are drawn as white lines.
 
+### Start
+
+By default the run does not begin from bare jumps. Each slab boundary is replaced by the exact solution of its Riemann problem at a time t0 shortly after the diaphragm bursts, and the main shock is installed already in the scheme's own settled profile, taken from a short side calculation of that shock alone with the same time step. The simulation runs from t0, and the snapshots before t0 are filled from the exact solution. The profile is placed so that mass is conserved exactly; momentum and energy differ from the exact state by what the start-up pulse would have carried (a few parts in 10⁴ of the total).
+
+With this start the dip behind the expansion tail falls from 0.5–3% to about 0.1% or less, and the contact surface starts at its exact position.
+
+It applies when all of these hold; otherwise the slabs start as plain jumps:
+
+- constant-γ gases or liquids (not the variable-γ model);
+- no area change within reach of the waves by t0;
+- the shock runs into gas at rest and separates from the contact quickly. t0 is the time for the shocked layer to grow to 12 cells, and by then the waves must not have reached a wall or another slab boundary, nor may t0 exceed half the run. A heavy driven gas such as SF₆ behind a helium driver fails this: its shocked layer grows too slowly.
+
 ### Equation of state
 
 Each slab has its own equation of state, and all materials in a cell share one pressure.
@@ -45,7 +57,7 @@ Primitive variables are only evaluated at snapshot times; between snapshots the 
 
 - Frozen composition: no dissociation, ionization, reaction or phase change (no cavitation). With constant γ there is no vibrational excitation either.
 - Inviscid and quasi-one-dimensional: no boundary layers, diaphragm opening dynamics, or losses at area changes. The shock takes a few transition lengths to reach the strength the shock tube calculator predicts.
-- Start-up error: a narrow dip of 2–4% in pressure sits just behind the tail of the driver expansion, about 8–18 cells wide. It comes from the first few steps after the diaphragm bursts, is common to shock-capturing schemes, narrows with more cells and fades slowly with time. It does not affect the states behind the shock or at the end wall.
+- Start-up error. A shock-capturing scheme cannot hold a perfectly sharp shock: in its first steps the jump spreads into a profile two or three cells wide and the difference is radiated backward as an acoustic pulse. In a shock tube the pulse crosses the contact surface into the driver gas, where it travels at the speed of the expansion's tail and stays beside it as a dip of 0.5–3% in pressure (more for heavy driven gases). The solver avoids this when it can; see "Start" below. Where it cannot, the dip remains: it is about 8–18 cells wide, narrows with more cells and fades slowly with time, and does not affect the states behind the shock or at the end wall.
 - Across an area contraction the pressure drops sharply, from the value behind the driver expansion to the contact-surface pressure. That is the steady nozzle flow, not an artifact.
 - Shocks are spread over two or three cells and contacts over more (about 7 cells after 200 steps at second order, twice that at first order); increase the grid cells to sharpen them.
 

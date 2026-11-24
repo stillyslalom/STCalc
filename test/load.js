@@ -28,7 +28,7 @@ function load() {
         mixtureProperties, validateGasDefinition, gasComposition,
         NASA9_DATA, NASA9_ALL_SPECIES, NASA_ALIASES, searchNasaSpecies, nasa9Species, makeThermo,
         ShockInputError, computeShockTube, machFromDriverPressure, maxMachForDriver, tailoredMach,
-        solveExactRiemann, solveShockedInterface,
+        solveExactRiemann, sampleExactRiemann, solveShockedInterface,
         EulerSolver, steadyWindow, interfaceArrival, analyzeTestTime
     })`, context);
 }
