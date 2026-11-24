@@ -425,3 +425,37 @@ for (const [integrator, variable] of [['Hancock', false], ['Hancock', true], ['S
         close(mass(solver), mass(initial), 1e-10, 'mass');
     });
 }
+
+test('pressure drops across the contraction by the steady-nozzle amount', () => {
+    // Upstream of the nozzle the driver gas is at state 3a; downstream it is at the contact pressure p2
+    const areaRatio = 2.25, g = HELIUM.gamma, R = lib.RU / HELIUM.mw;
+    const shock = lib.computeShockTube({ mach: 3, p1: 101325, t1: 300, t4: 300, driven: AIR, driver: HELIUM, areaRatio });
+    const T3 = shock.state3.T, u3 = shock.state3.u;
+    const H0 = g * R * T3 / (g - 1) + 0.5 * u3 * u3;
+    const rho = T => Math.pow(T, 1 / (g - 1));
+    let lo = T3, hi = 300;
+    for (let i = 0; i < 200; i++) {
+        const T = 0.5 * (lo + hi), ua = Math.sqrt(Math.max(0, 2 * (H0 - g * R * T / (g - 1))));
+        if (areaRatio * rho(T) * ua > rho(T3) * u3) lo = T; else hi = T;
+    }
+    const upstream = shock.state4.p * Math.pow(0.5 * (lo + hi) / 300, g / (g - 1));
+    assert.ok(upstream > 1.5 * shock.state2.p, 'the drop is large');
+
+    const solver = run([aslab(slab(HELIUM, shock.state4.p, 300, 3), areaRatio), aslab(slab(AIR, 101325, 300, 6), 1)],
+        { finalTime: 0.004, nx: 500, ...hancock });
+    close(mean(solver, 'p', 2.4, 2.6), upstream, 0.005, 'pressure upstream of the nozzle');
+    close(mean(solver, 'p', 3.1, 3.4), shock.state2.p, 0.01, 'pressure downstream of the nozzle');
+});
+
+test('start-up error at the tail of the driver expansion stays small', () => {
+    // A known artifact of shock-capturing schemes: a narrow dip just behind the fan tail
+    const shock = lib.computeShockTube({ mach: 5, p1: 101325, t1: 300, t4: 300, driven: AIR, driver: HELIUM });
+    const tEnd = 0.003;
+    const solver = run([slab(HELIUM, shock.state4.p, 300, 3), slab(AIR, 101325, 300, 6)], { finalTime: tEnd, nx: 500, ...hancock });
+    const tail = 3 + (shock.state3.u - shock.state3.a) * tEnd, contact = solver.tracers[0].x;
+    let lowest = Infinity;
+    for (let i = 0; i < solver.nx; i++) {
+        if (solver.x[i] > tail && solver.x[i] < contact - 0.15 * (contact - tail)) lowest = Math.min(lowest, solver.p[i]);
+    }
+    assert.ok(lowest > 0.96 * shock.state2.p, `dip to ${(lowest / shock.state2.p).toFixed(4)} of p2`);
+});

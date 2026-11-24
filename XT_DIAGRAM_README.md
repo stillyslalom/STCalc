@@ -45,6 +45,8 @@ Primitive variables are only evaluated at snapshot times; between snapshots the 
 
 - Frozen composition: no dissociation, ionization, reaction or phase change (no cavitation). With constant γ there is no vibrational excitation either.
 - Inviscid and quasi-one-dimensional: no boundary layers, diaphragm opening dynamics, or losses at area changes. The shock takes a few transition lengths to reach the strength the shock tube calculator predicts.
+- Start-up error: a narrow dip of 2–4% in pressure sits just behind the tail of the driver expansion, about 8–18 cells wide. It comes from the first few steps after the diaphragm bursts, is common to shock-capturing schemes, narrows with more cells and fades slowly with time. It does not affect the states behind the shock or at the end wall.
+- Across an area contraction the pressure drops sharply, from the value behind the driver expansion to the contact-surface pressure. That is the steady nozzle flow, not an artifact.
 - Shocks are spread over two or three cells and contacts over more (about 7 cells after 200 steps at second order, twice that at first order); increase the grid cells to sharpen them.
 
 ## Output files
