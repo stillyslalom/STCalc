@@ -113,7 +113,7 @@ function niceTicks(min, max, target) {
     const fraction = rough / power;
     const step = (fraction < 1.5 ? 1 : fraction < 3.5 ? 2 : fraction < 7.5 ? 5 : 10) * power;
     const ticks = [];
-    for (let k = Math.ceil(min / step - 1e-9); k * step <= max + step * 1e-9; k++) {
+    for (let k = Math.ceil(min / step - 1e-6); k * step <= max + step * 1e-6; k++) {
         ticks.push(Math.abs(k * step) < step * 1e-9 ? 0 : k * step);
     }
     return ticks;
@@ -124,6 +124,36 @@ function tickLabel(value, ticks) {
     const step = ticks.length > 1 ? Math.abs(ticks[1] - ticks[0]) : Math.abs(value) || 1;
     const decimals = Math.max(0, Math.min(6, -Math.floor(Math.log10(step) + 1e-9)));
     return value.toFixed(decimals);
+}
+
+/**
+ * Size a canvas to its container (up to maxWidth CSS pixels) at the screen's
+ * pixel density, so text stays sharp and readable on phones.
+ * Drawing then uses CSS-pixel coordinates.
+ */
+function fitCanvas(canvas, maxWidth, aspect, minHeight) {
+    const available = canvas.parentElement.clientWidth || maxWidth;
+    const width = Math.max(260, Math.min(maxWidth, Math.floor(available)));
+    const height = Math.max(minHeight || 0, Math.round(width * aspect));
+    const dpr = window.devicePixelRatio || 1;
+    canvas.style.width = width + 'px';
+    canvas.style.height = height + 'px';
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { ctx: ctx, width: width, height: height, dpr: dpr };
+}
+
+/** Call fn after the window has stopped resizing. */
+function onResizeEnd(fn) {
+    let timer = null, lastWidth = window.innerWidth;
+    window.addEventListener('resize', function () {
+        if (window.innerWidth === lastWidth) return;   // ignore mobile toolbar show/hide
+        lastWidth = window.innerWidth;
+        clearTimeout(timer);
+        timer = setTimeout(fn, 150);
+    });
 }
 
 function downloadBlob(content, mimeType, filename) {
@@ -339,7 +369,7 @@ class GasPicker {
             const total = this.total();
             const ok = Math.abs(total - 1) < 0.001;
             totalNode.className = 'mixture-total ' + (ok ? 'ok' : 'bad');
-            totalNode.textContent = 'Total: ' + (Math.round(total * 1e4) / 100) + '%' + (ok ? ' ✓' : ' (must be 100%)');
+            totalNode.textContent = 'Total ' + (Math.round(total * 1e4) / 100) + '%' + (ok ? ' ✓' : ' (needs 100%)');
         };
 
         const rowNodes = this.rows.map((row, index) => {
@@ -367,7 +397,7 @@ class GasPicker {
                     this.changed();
                 }
             }, 'Remove');
-            return el('div', { class: 'mixture-row' }, gasSelect, el('span', {}, 'mole fraction'), fraction, remove);
+            return el('div', { class: 'mixture-row' }, gasSelect, el('span', { class: 'hint' }, 'mole fraction'), fraction, remove);
         });
 
         const add = el('button', {
@@ -377,7 +407,7 @@ class GasPicker {
                 this.render();
                 this.changed();
             }
-        }, 'Add component');
+        }, 'Add');
 
         this.container.replaceChildren(...rowNodes, el('div', {}, add, totalNode));
         updateTotal();

@@ -26,7 +26,7 @@ async function exportXTDataHDF5() {
     
     try {
         // h5wasm (~1 MB) is only fetched the first time an HDF5 export is requested
-        showXTMessage('Loading HDF5 library...', 'info');
+        showXTMessage('Loading HDF5 library…', 'info');
         const h5wasm = await loadH5Wasm();
         const { FS } = await h5wasm.ready;
         

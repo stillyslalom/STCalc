@@ -126,9 +126,8 @@ function computeShockTube(input) {
         const mMax = maxMachForDriver(input.driven, input.driver, t1, t4);
         warnings.push({
             code: 'unreachable',
-            message: 'Mach ' + m + ' cannot be reached with this driver gas at ' + t4 +
-                ' K: the limit for infinite driver pressure is Mach ' + mMax.toFixed(2) +
-                '. Use a lighter or hotter driver gas. Driver pressure is not shown; the other states are valid for the requested Mach number.'
+            message: 'Mach ' + m + ' is unreachable with this driver (limit Mach ' + mMax.toFixed(2) +
+                '). Use a lighter or hotter driver gas. Other states are still valid.'
         });
     } else {
         d4 = (p4 + pinf4) / (r4 * t4);
@@ -136,8 +135,8 @@ function computeShockTube(input) {
         if (p4 > EXTREME_DRIVER_PRESSURE_PA && pinf4 === 0) {
             warnings.push({
                 code: 'extreme-driver-pressure',
-                message: 'The required driver pressure (' + (p4 / 1e6).toPrecision(3) + ' MPa) is far beyond practical shock tube drivers and the ideal-gas law. This driver gas tops out near Mach ' +
-                    maxMachForDriver(input.driven, input.driver, t1, t4).toFixed(2) + '; use a lighter or hotter driver gas.'
+                message: 'Driver pressure is impractically high (driver limit is Mach ' +
+                    maxMachForDriver(input.driven, input.driver, t1, t4).toFixed(2) + '). Use a lighter or hotter driver gas.'
             });
         }
     }
@@ -146,8 +145,8 @@ function computeShockTube(input) {
     if (hottest > HIGH_TEMPERATURE_WARNING_K && pinf === 0) {
         warnings.push({
             code: 'high-temperature',
-            message: 'Temperatures reach ' + hottest.toFixed(0) + ' K. Results assume constant γ; above about ' +
-                HIGH_TEMPERATURE_WARNING_K + ' K vibrational excitation and dissociation make real post-shock temperatures lower.'
+            message: 'Temperatures reach ' + hottest.toFixed(0) + ' K; constant γ overestimates them above about ' +
+                HIGH_TEMPERATURE_WARNING_K + ' K.'
         });
     }
 

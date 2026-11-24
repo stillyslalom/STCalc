@@ -44,7 +44,7 @@ function renderXTSlabs() {
     xtSlabPickers = {};
 
     if (xtSlabs.length === 0) {
-        container.replaceChildren(el('p', { class: 'hint' }, 'No slabs yet. Add at least two to form a shock tube.'));
+        container.replaceChildren(el('p', { class: 'hint' }, 'No slabs.'));
         return;
     }
 
@@ -68,7 +68,7 @@ function renderXTSlabs() {
         const node = el('div', { class: 'slab-item' },
             el('div', { class: 'slab-number' }, '#' + n),
             el('div', { class: 'slab-controls' },
-                el('label', { class: 'slab-field' }, 'Gas or liquid', select),
+                el('label', { class: 'slab-field' }, 'Material', select),
                 numberField('Pressure (kPa)', Number((slab.pressure / 1000).toPrecision(7)), function (v) { slab.pressure = v * 1000; }),
                 numberField('Temperature (K)', slab.temperature, function (v) { slab.temperature = v; }),
                 numberField('Length (m)', slab.length, function (v) { slab.length = v; })),
@@ -101,7 +101,7 @@ function importShockIntoXT() {
         return false;
     }
     if (!shock.reachable) {
-        showXTMessage('The shock tube calculation has no driver pressure (the Mach number is unreachable), so there is nothing to import.', 'warning');
+        showXTMessage('The shock tube calculation has no driver pressure to import.', 'warning');
         return false;
     }
     syncXTSlabGases();
@@ -126,11 +126,9 @@ function updateInterfaceMethodInfo() {
 
     if (hasLiquidInterface) select.value = 'mixed';
     select.options[1].disabled = hasLiquidInterface;
-    byId('interfaceMethodInfo').textContent = hasLiquidInterface
-        ? 'Required for gas–liquid interfaces.'
-        : (select.value === 'mixed'
-            ? 'Conservative; interfaces are smeared over a few cells.'
-            : 'Faster, but not conservative at interfaces (about 1% error in wave strengths).');
+    byId('xtInterfaceMethodLabel').title = hasLiquidInterface
+        ? 'Mixed cell is required for gas–liquid interfaces.'
+        : 'Mixed cell is conservative. Sharp is faster but about 1% off in wave strengths.';
 }
 
 /* ------------------------------------------------------------------ */
@@ -160,7 +158,7 @@ function readXTConfiguration() {
     const probes = probeInput.value.split(/[,;\s]+/).filter(Boolean).map(function (text) {
         const x = Number(text);
         if (!isFinite(x) || x < 0 || x > totalLength) {
-            throw new FieldError(probeInput, 'Probe position "' + text + '" must be a number between 0 and the tube length (' + formatSig(totalLength, 4) + ' m).');
+            throw new FieldError(probeInput, 'Probe "' + text + '" must be between 0 and ' + formatSig(totalLength, 4) + ' m.');
         }
         return x;
     });
@@ -182,7 +180,7 @@ function runXTSimulation() {
     try {
         config = readXTConfiguration();
         if (config.finalTime / config.xtInterval > 5000) {
-            throw new FieldError(byId('xtSnapshotInterval'), 'That would store more than 5000 snapshots. Increase the snapshot interval.');
+            throw new FieldError(byId('xtSnapshotInterval'), 'Too many snapshots (over 5000). Increase the interval.');
         }
     } catch (error) {
         reportError(byId('xtMessageContainer'), error);
@@ -197,7 +195,7 @@ function runXTSimulation() {
     progress.hidden = false;
     fill.style.width = '0%';
     fill.textContent = '0%';
-    showXTMessage('Running the solver…', 'info');
+    showXTMessage('');
 
     const finish = function () {
         runBtn.disabled = false;
@@ -242,7 +240,7 @@ function runXTSimulation() {
             xtProbePositions = config.probes;
 
             byId('xtCanvasContainer').hidden = false;
-            if (!xtVisualization) xtVisualization = new XTVisualization('xtCanvas', { width: 1000, height: 600 });
+            if (!xtVisualization) xtVisualization = new XTVisualization('xtCanvas');
             xtVisualization.setProbes(xtProbePositions);
             xtVisualization.field = byId('xtField').value;
             xtVisualization.useLogScale = byId('xtLogScale').checked;
@@ -250,7 +248,6 @@ function runXTSimulation() {
             xtVisualization.render();
             renderXTProbes();
             displayXTStatistics(xtResults);
-            showXTMessage('Simulation complete.', 'success');
             finish();
         } catch (error) {
             fail(error);
@@ -292,16 +289,18 @@ function probeSeries(results, x, field) {
 function renderXTProbes() {
     const hasProbes = xtProbePositions.length > 0;
     byId('xtProbeContainer').hidden = !hasProbes;
-    byId('xtProbeLegend').hidden = !hasProbes;
     byId('xtProbeExportBtn').hidden = !hasProbes;
     if (!hasProbes || !xtResults) return;
 
     const fieldKey = byId('xtField').value;
     const field = XT_FIELDS[fieldKey];
-    const canvas = byId('xtProbeCanvas');
-    const ctx = canvas.getContext('2d');
-    const width = canvas.width, height = canvas.height;
-    const margin = { left: 70, right: 150, top: 20, bottom: 50 };
+    const fit = fitCanvas(byId('xtProbeCanvas'), 1000, 0.36, 240);
+    const ctx = fit.ctx, width = fit.width, height = fit.height;
+    const narrow = width < 560;
+    // The legend sits beside the plot when there is room, otherwise above it
+    const margin = narrow
+        ? { left: 52, right: 12, top: 16 + 18 * xtProbePositions.length, bottom: 46 }
+        : { left: 64, right: 130, top: 16, bottom: 46 };
     const plotWidth = width - margin.left - margin.right;
     const plotHeight = height - margin.top - margin.bottom;
 
@@ -315,7 +314,7 @@ function renderXTProbes() {
     if (!(hi > lo)) { hi = lo + 1; lo = lo - 1; }
     const tMax = series[0][series[0].length - 1].t;
     const yTicks = niceTicks(lo, hi, 5);
-    const xTicks = niceTicks(0, tMax, 8);
+    const xTicks = niceTicks(0, tMax, narrow ? 4 : 8);
     const yMin = Math.min(lo, yTicks[0]), yMax = Math.max(hi, yTicks[yTicks.length - 1]);
     const sx = function (t) { return margin.left + t / tMax * plotWidth; };
     const sy = function (v) { return margin.top + plotHeight - (v - yMin) / (yMax - yMin) * plotHeight; };
@@ -355,11 +354,13 @@ function renderXTProbes() {
         ctx.stroke();
 
         // Legend entry
-        const ly = margin.top + 12 + n * 20;
-        ctx.beginPath(); ctx.moveTo(width - margin.right + 15, ly); ctx.lineTo(width - margin.right + 40, ly); ctx.stroke();
+        const lx = narrow ? margin.left : width - margin.right + 12;
+        const ly = narrow ? 14 + n * 18 : margin.top + 10 + n * 20;
+        ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx + 22, ly); ctx.stroke();
         ctx.fillStyle = '#000';
         ctx.textAlign = 'left';
-        ctx.fillText('x = ' + formatSig(xtProbePositions[n], 4) + ' m', width - margin.right + 46, ly);
+        ctx.textBaseline = 'middle';
+        ctx.fillText('x = ' + formatSig(xtProbePositions[n], 4) + ' m', lx + 28, ly);
     });
 
     ctx.fillStyle = '#000';
@@ -367,11 +368,18 @@ function renderXTProbes() {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
     ctx.fillText('Time (ms)', margin.left + plotWidth / 2, height - 10);
-    ctx.save();
-    ctx.translate(18, margin.top + plotHeight / 2);
-    ctx.rotate(-Math.PI / 2);
-    ctx.fillText(field.label + ' (' + field.unit + ')', 0, 0);
-    ctx.restore();
+    const axisLabel = field.label + ' (' + field.unit + ')';
+    if (narrow) {
+        // No room beside the tick labels: put the axis label in the top corner
+        ctx.textAlign = 'right';
+        ctx.fillText(axisLabel, width - margin.right, 18);
+    } else {
+        ctx.save();
+        ctx.translate(16, margin.top + plotHeight / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText(axisLabel, 0, 0);
+        ctx.restore();
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -467,7 +475,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (byId('xt').open) initialise();
 
     byId('xtImportBtn').addEventListener('click', function () {
-        if (importShockIntoXT()) showXTMessage('Slabs 1 and 2 now match the shock tube calculation.', 'success');
+        if (importShockIntoXT()) showXTMessage('');
     });
     byId('xtAddSlabBtn').addEventListener('click', function () {
         syncXTSlabGases();
@@ -488,6 +496,12 @@ document.addEventListener('DOMContentLoaded', function () {
     });
     byId('xtLogScale').addEventListener('change', function () {
         if (xtVisualization) xtVisualization.setLogScale(byId('xtLogScale').checked);
+    });
+
+    onResizeEnd(function () {
+        if (!xtResults || byId('xtCanvasContainer').hidden) return;
+        xtVisualization.render();
+        renderXTProbes();
     });
 
     byId('xtCanvasContainer').addEventListener('click', function (event) {

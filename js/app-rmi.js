@@ -4,6 +4,7 @@
  */
 
 let interfacePicker;
+let rmiGrowth = null;   // last plotted series, kept for redrawing on resize
 
 function calculateInterface() {
     const form = byId('interfaceForm');
@@ -14,7 +15,7 @@ function calculateInterface() {
 
     try {
         const shock = appState.shock, inputs = appState.shockInputs;
-        if (!shock) throw userError('Run the shock tube calculation first: the interface is hit by its incident shock.');
+        if (!shock) throw userError('Run the shock tube calculation first.');
 
         const downstream = interfacePicker.resolve();
         const tDownstream = readNumber(byId('interfaceHeavyTemp'), 'Downstream temperature', { positive: true });
@@ -31,10 +32,8 @@ function calculateInterface() {
         set('interfaceVelocity', formatSig(result.interfaceVelocity));
         set('interfacePressure', formatSig(result.interfacePressure / 1e6));
         set('atwoodNumber', formatSig(result.atwoodNumber));
-        byId('waveConfigLeft').textContent = result.waveConfig.left === 'shock'
-            ? 'Shock, back into the driven gas' : 'Rarefaction, back into the driven gas';
-        byId('waveConfigRight').textContent = result.waveConfig.right === 'shock'
-            ? 'Shock, into the downstream gas' : 'Rarefaction, into the downstream gas';
+        set('waveConfigLeft', result.waveConfig.left === 'shock' ? 'Shock' : 'Rarefaction');
+        set('waveConfigRight', result.waveConfig.right === 'shock' ? 'Shock' : 'Rarefaction');
 
         set('lightGasPressure', formatSig(result.lightGasPost.p / 1e6));
         set('lightGasTemp', formatSig(result.lightGasPost.T));
@@ -47,10 +46,10 @@ function calculateInterface() {
 
         const notes = [];
         if (!result.converged) {
-            notes.push({ type: 'warning', text: 'The Riemann solver did not fully converge; treat these values as approximate.' });
+            notes.push({ type: 'warning', text: 'The Riemann solver did not fully converge; values are approximate.' });
         }
         if (!(result.interfaceVelocity > 0)) {
-            throw userError('The interface does not move downstream for these conditions, so the diagnostic location is never reached.');
+            throw userError('The interface does not move downstream, so it never reaches the diagnostic.');
         }
 
         const deltaU = calculateVelocityJump(result.interfaceVelocity, 0);
@@ -69,16 +68,17 @@ function calculateInterface() {
             formatSig(rmiDimonteAmplitude(a0, result.atwoodNumber, k, deltaU, tArrival) * 1000, 3);
 
         if (params.ka0 > 1) {
-            notes.push({ type: 'warning', text: 'ka₀ = ' + formatSig(params.ka0, 3) + ' is outside the small-amplitude range (ka₀ ≪ 1) the growth models assume.' });
+            notes.push({ type: 'warning', text: 'ka₀ = ' + formatSig(params.ka0, 3) + ' is outside the small-amplitude range of the growth models.' });
         }
         if (result.atwoodNumber < 0) {
-            notes.push({ type: 'info', text: 'Negative Atwood number (heavy to light): the perturbation first shrinks and reverses phase before growing.' });
+            notes.push({ type: 'info', text: 'Negative Atwood number: the perturbation reverses phase before growing.' });
         }
 
         results.hidden = false;
-        plotRMIGrowth(calculateGrowthTimeSeries({
+        rmiGrowth = calculateGrowthTimeSeries({
             eta0: a0, lambda: lambda, A: result.atwoodNumber, deltaU: deltaU, tMax: tArrival, numPoints: 200
-        }));
+        });
+        plotRMIGrowth(rmiGrowth);
         showMessages(messages, notes);
     } catch (error) {
         reportError(messages, error);
@@ -86,10 +86,9 @@ function calculateInterface() {
 }
 
 function plotRMIGrowth(growth) {
-    const canvas = byId('rmiGrowthCanvas');
-    const ctx = canvas.getContext('2d');
-    const width = canvas.width, height = canvas.height;
-    const margin = { left: 70, right: 30, top: 20, bottom: 50 };
+    const fit = fitCanvas(byId('rmiGrowthCanvas'), 800, 0.5, 240);
+    const ctx = fit.ctx, width = fit.width, height = fit.height;
+    const margin = { left: 58, right: 16, top: 16, bottom: 46 };
     const plotWidth = width - margin.left - margin.right;
     const plotHeight = height - margin.top - margin.bottom;
 
@@ -101,7 +100,7 @@ function plotRMIGrowth(growth) {
 
     const all = series[0].data.concat(series[1].data);
     const yTicks = niceTicks(Math.min(0, ...all), Math.max(...all), 6);
-    const xTicks = niceTicks(0, times[times.length - 1], 6);
+    const xTicks = niceTicks(0, times[times.length - 1], width < 500 ? 4 : 6);
     const yMin = yTicks[0], yMax = Math.max(yTicks[yTicks.length - 1], Math.max(...all));
     const xMax = times[times.length - 1];
     const sx = function (t) { return margin.left + t / xMax * plotWidth; };
@@ -147,9 +146,9 @@ function plotRMIGrowth(growth) {
     ctx.font = '14px Arial';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
-    ctx.fillText('Time after shock passage (ms); the right edge is the diagnostic location', margin.left + plotWidth / 2, height - 10);
+    ctx.fillText('Time (ms)', margin.left + plotWidth / 2, height - 10);
     ctx.save();
-    ctx.translate(18, margin.top + plotHeight / 2);
+    ctx.translate(16, margin.top + plotHeight / 2);
     ctx.rotate(-Math.PI / 2);
     ctx.fillText('Amplitude (mm)', 0, 0);
     ctx.restore();
@@ -164,11 +163,16 @@ document.addEventListener('DOMContentLoaded', function () {
         calculateInterface();
     });
 
+    onResizeEnd(function () {
+        if (rmiGrowth && !byId('interfaceResults').hidden) plotRMIGrowth(rmiGrowth);
+    });
+
     // Results describe the previous incident shock once the shock tube inputs change
     appState.shockListeners.push(function () {
         if (!byId('interfaceResults').hidden) {
             byId('interfaceResults').hidden = true;
-            showMessages(byId('interfaceMessages'), [{ type: 'info', text: 'The shock tube calculation changed. Recalculate the interface.' }]);
+            rmiGrowth = null;
+            showMessages(byId('interfaceMessages'), [{ type: 'info', text: 'Shock tube inputs changed — recalculate.' }]);
         }
     });
 });

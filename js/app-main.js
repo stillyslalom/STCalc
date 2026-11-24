@@ -98,9 +98,9 @@ function calcShock() {
     set('pfourpsig', formatSig(result.driverPressurePsig));
     set('outgamma', formatSig(result.gamma));
     set('outmw', formatSig(result.mw));
-    byId('outmwUnit').textContent = result.pinf > 0
-        ? 'g/mol (effective), p∞ = ' + formatSig(result.pinf / 1e6, 4) + ' MPa'
-        : 'g/mol';
+    byId('outmwLabel').title = result.pinf > 0
+        ? 'Effective value for the stiffened gas; p∞ = ' + formatSig(result.pinf / 1e6, 4) + ' MPa'
+        : '';
 
     showMessages(messages, result.warnings.map(function (w) { return { type: 'warning', text: w.message }; }));
     byId('shockOutput').classList.remove('stale');
@@ -196,11 +196,11 @@ function loadShockState() {
 function copyShockLink() {
     const url = location.origin + location.pathname + '?' + shockStateToQuery(readShockInputState());
     const done = function () {
-        showMessages(byId('shockMessages'), [{ type: 'success', text: 'Link copied. Opening it restores these inputs, including any custom gases.' }]);
+        showMessages(byId('shockMessages'), [{ type: 'success', text: 'Link copied.' }]);
     };
     const fallback = function () {
         history.replaceState(null, '', url);
-        showMessages(byId('shockMessages'), [{ type: 'info', text: 'The address bar now holds a link to this setup.' }]);
+        showMessages(byId('shockMessages'), [{ type: 'info', text: 'Link is in the address bar.' }]);
     };
     if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(url).then(done, fallback);
@@ -237,7 +237,7 @@ function calcTime() {
             byId('tdelaymembrane').value = '—';
             showMessages(messages, [{
                 type: 'warning',
-                text: 'Run the shock tube calculation above to get the measured Mach number and the interface delay; they need its sound speed and post-shock gas velocity.'
+                text: 'Run the shock tube calculation to get the Mach number and interface delay.'
             }]);
             return;
         }
@@ -246,10 +246,7 @@ function calcTime() {
         byId('mactual').value = formatSig(wactual / a1);
         // Shock travels to the interface, then the interface moves with the shocked gas
         byId('tdelaymembrane').value = formatSig((xint / wactual + (xtrig - xint) / u2) * 1000);
-        showMessages(messages, [{
-            type: 'info',
-            text: 'Using a₁ = ' + formatSig(a1, 4) + ' m/s and u₂ = ' + formatSig(u2, 4) + ' m/s from the shock tube calculation.'
-        }]);
+        showMessages(messages, []);
     } catch (error) {
         reportError(messages, error);
     }
@@ -348,7 +345,7 @@ function submitGasForm() {
         resetGasForm();
         const items = [{ type: 'success', text: (id ? 'Updated ' : 'Added ') + name + '.' }];
         if (!GasLibrary.storageWorks) {
-            items.push({ type: 'warning', text: 'Browser storage is unavailable, so custom gases will be lost when this page is closed.' });
+            items.push({ type: 'warning', text: 'Browser storage is unavailable; custom gases will not be kept.' });
         }
         showMessages(messages, items);
     } catch (error) {
@@ -367,39 +364,26 @@ function gasInUse(id) {
 }
 
 function renderGasList() {
-    const container = byId('gasList');
     const gases = Object.values(GasLibrary.custom);
-    if (gases.length === 0) {
-        container.replaceChildren(el('p', { class: 'hint' }, 'No custom gases defined yet.'));
-        return;
-    }
-    const rows = gases.map(function (gas) {
-        const liquid = gas.pinf > 0;
-        return el('tr', {},
-            el('td', {}, gas.name),
-            el('td', {}, liquid ? 'Stiffened gas' : 'Ideal gas'),
-            el('td', {}, formatSig(gas.gamma, 5)),
-            el('td', {}, liquid ? '—' : formatSig(gas.mw, 6)),
-            el('td', {}, liquid ? formatSig(gas.pinf / 1e6, 5) : '—'),
-            el('td', {}, liquid ? formatSig(eosDensity(gas, STP_REF_P, STP_REF_T), 5) : '—'),
-            el('td', {},
-                el('button', { type: 'button', class: 'secondary small', onclick: function () { editGasInForm(gas.id); } }, 'Edit'), ' ',
-                el('button', {
-                    type: 'button', class: 'danger small',
-                    onclick: function () {
-                        const note = gasInUse(gas.id) ? ' It is currently selected and will be deselected.' : '';
-                        if (!confirm('Delete "' + gas.name + '"?' + note)) return;
-                        GasLibrary.remove(gas.id);
-                        if (byId('gasFormId').value === gas.id) resetGasForm();
-                    }
-                }, 'Delete')));
-    });
-    container.replaceChildren(el('table', {},
-        el('thead', {}, el('tr', {},
-            ...['Name', 'Equation of state', 'γ', 'MW (g/mol)', 'p∞ (MPa)', 'Density (kg/m³)', ''].map(function (text) {
-                return el('th', { scope: 'col' }, text);
-            }))),
-        el('tbody', {}, ...rows)));
+    byId('gasList').replaceChildren(...gases.map(function (gas) {
+        const props = gas.pinf > 0
+            ? 'γ ' + formatSig(gas.gamma, 5) + ', p∞ ' + formatSig(gas.pinf / 1e6, 5) + ' MPa, ' +
+              formatSig(eosDensity(gas, STP_REF_P, STP_REF_T), 5) + ' kg/m³'
+            : 'γ ' + formatSig(gas.gamma, 5) + ', ' + formatSig(gas.mw, 6) + ' g/mol';
+        return el('div', { class: 'gas-entry' },
+            el('strong', {}, gas.name),
+            el('span', { class: 'props' }, props),
+            el('button', { type: 'button', class: 'secondary small', onclick: function () { editGasInForm(gas.id); } }, 'Edit'),
+            el('button', {
+                type: 'button', class: 'danger small',
+                onclick: function () {
+                    const note = gasInUse(gas.id) ? ' It is currently selected and will be deselected.' : '';
+                    if (!confirm('Delete "' + gas.name + '"?' + note)) return;
+                    GasLibrary.remove(gas.id);
+                    if (byId('gasFormId').value === gas.id) resetGasForm();
+                }
+            }, 'Delete'));
+    }));
 }
 
 /* ------------------------------------------------------------------ */

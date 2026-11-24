@@ -53,23 +53,11 @@ const XT_FIELDS = {
 };
 
 class XTVisualization {
-    constructor(canvasId, config = {}) {
+    constructor(canvasId) {
         this.canvas = document.getElementById(canvasId);
         this.ctx = this.canvas.getContext('2d');
-
-        this.width = config.width || 1000;
-        this.height = config.height || 600;
-        this.margin = config.margin || { top: 40, right: 110, bottom: 60, left: 70 };
-        this.canvas.width = this.width;
-        this.canvas.height = this.height;
-
         // The finished plot is cached so that tooltips redraw cheaply
         this.cacheCanvas = document.createElement('canvas');
-        this.cacheCanvas.width = this.width;
-        this.cacheCanvas.height = this.height;
-
-        this.plotWidth = this.width - this.margin.left - this.margin.right;
-        this.plotHeight = this.height - this.margin.top - this.margin.bottom;
 
         this.results = null;
         this.field = 'p';
@@ -81,12 +69,29 @@ class XTVisualization {
         this.mouseX = -1;
         this.mouseY = -1;
         this.tooltipPending = false;
+        this.layout();
         this.setupEventListeners();
+    }
+
+    /** Fit the canvas to its container; all drawing uses CSS-pixel coordinates. */
+    layout() {
+        const fit = fitCanvas(this.canvas, 1000, 0.6, 300);
+        this.ctx = fit.ctx;
+        this.width = fit.width;
+        this.height = fit.height;
+        this.dpr = fit.dpr;
+        this.narrow = this.width < 560;
+        this.margin = this.narrow
+            ? { top: 30, right: 62, bottom: 44, left: 40 }
+            : { top: 36, right: 84, bottom: 52, left: 58 };
+        this.plotWidth = this.width - this.margin.left - this.margin.right;
+        this.plotHeight = this.height - this.margin.top - this.margin.bottom;
+        this.cacheCanvas.width = this.canvas.width;
+        this.cacheCanvas.height = this.canvas.height;
     }
 
     setupEventListeners() {
         const move = (clientX, clientY) => {
-            // The canvas may be displayed smaller than its pixel size
             const rect = this.canvas.getBoundingClientRect();
             this.mouseX = (clientX - rect.left) * this.width / rect.width;
             this.mouseY = (clientY - rect.top) * this.height / rect.height;
@@ -182,8 +187,10 @@ class XTVisualization {
     }
 
     render() {
+        this.layout();
         const visible = this.ctx;
         this.ctx = this.cacheCanvas.getContext('2d');
+        this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
         this.ctx.fillStyle = '#ffffff';
         this.ctx.fillRect(0, 0, this.width, this.height);
         if (this.results) {
@@ -198,35 +205,43 @@ class XTVisualization {
     }
 
     drawFromCache() {
+        this.ctx.save();
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);   // the cache is in device pixels
         this.ctx.drawImage(this.cacheCanvas, 0, 0);
+        this.ctx.restore();
     }
 
     drawHeatmap() {
         const data = this.results.xtData;
         const nx = this.results.x.length;
-        const image = this.ctx.createImageData(this.plotWidth, this.plotHeight);
+        // Image data is addressed in device pixels
+        const x0 = Math.round(this.margin.left * this.dpr);
+        const y0 = Math.round(this.margin.top * this.dpr);
+        const w = Math.round((this.margin.left + this.plotWidth) * this.dpr) - x0;
+        const h = Math.round((this.margin.top + this.plotHeight) * this.dpr) - y0;
+        const image = this.ctx.createImageData(w, h);
         const pixels = image.data;
 
         // Nearest cell for every pixel column
-        const column = new Int32Array(this.plotWidth);
-        for (let px = 0; px < this.plotWidth; px++) {
-            column[px] = Math.min(nx - 1, Math.floor((px + 0.5) / this.plotWidth * nx));
+        const column = new Int32Array(w);
+        for (let px = 0; px < w; px++) {
+            column[px] = Math.min(nx - 1, Math.floor((px + 0.5) / w * nx));
         }
 
-        for (let py = 0; py < this.plotHeight; py++) {
-            const fraction = 1 - (py + 0.5) / this.plotHeight;
+        for (let py = 0; py < h; py++) {
+            const fraction = 1 - (py + 0.5) / h;
             const values = data[Math.min(data.length - 1, Math.round(fraction * (data.length - 1)))][this.field];
-            for (let px = 0; px < this.plotWidth; px++) {
+            for (let px = 0; px < w; px++) {
                 const norm = Math.max(0, Math.min(1, this.normalize(values[column[px]])));
                 const c = Math.round(norm * INFERNO_LAST) * 3;
-                const o = (py * this.plotWidth + px) * 4;
+                const o = (py * w + px) * 4;
                 pixels[o] = INFERNO_LUT[c];
                 pixels[o + 1] = INFERNO_LUT[c + 1];
                 pixels[o + 2] = INFERNO_LUT[c + 2];
                 pixels[o + 3] = 255;
             }
         }
-        this.ctx.putImageData(image, this.margin.left, this.margin.top);
+        this.ctx.putImageData(image, x0, y0);
     }
 
     drawTracers() {
@@ -267,7 +282,7 @@ class XTVisualization {
 
         ctx.font = '12px Arial';
         ctx.textAlign = 'center';
-        const xTicks = niceTicks(this.xMin, this.xMax, 8);
+        const xTicks = niceTicks(this.xMin, this.xMax, this.narrow ? 5 : 8);
         for (const x of xTicks) {
             const px = this.xToPixel(x);
             ctx.beginPath(); ctx.moveTo(px, bottom); ctx.lineTo(px, bottom + 5); ctx.stroke();
@@ -278,27 +293,29 @@ class XTVisualization {
         for (const t of tTicks) {
             const py = this.tToPixel(t / 1000);
             ctx.beginPath(); ctx.moveTo(this.margin.left - 5, py); ctx.lineTo(this.margin.left, py); ctx.stroke();
-            ctx.fillText(tickLabel(t, tTicks), this.margin.left - 10, py + 4);
+            ctx.fillText(tickLabel(t, tTicks), this.margin.left - 8, py + 4);
         }
 
-        ctx.font = '14px Arial';
+        ctx.font = '13px Arial';
         ctx.textAlign = 'center';
-        ctx.fillText('Position (m)', this.margin.left + this.plotWidth / 2, this.height - 15);
+        ctx.fillText('Position (m)', this.margin.left + this.plotWidth / 2, this.height - 8);
         ctx.save();
-        ctx.translate(18, this.margin.top + this.plotHeight / 2);
+        ctx.translate(12, this.margin.top + this.plotHeight / 2);
         ctx.rotate(-Math.PI / 2);
         ctx.fillText('Time (ms)', 0, 0);
         ctx.restore();
 
-        ctx.font = 'bold 16px Arial';
-        ctx.fillText('x-t diagram: ' + field.label.toLowerCase(), this.margin.left + this.plotWidth / 2, 22);
+        // The colour scale is labelled above the colour bar
+        ctx.font = 'bold 13px Arial';
+        ctx.textAlign = 'right';
+        ctx.fillText(field.label + ' (' + field.unit + ')', this.width - 6, this.margin.top - 12);
     }
 
     drawColorbar() {
         const ctx = this.ctx;
         const field = XT_FIELDS[this.field];
-        const barWidth = 20;
-        const barX = this.width - this.margin.right + 20;
+        const barWidth = 14;
+        const barX = this.width - this.margin.right + 10;
         const barY = this.margin.top;
         const barHeight = this.plotHeight;
 
@@ -321,24 +338,17 @@ class XTVisualization {
             for (let e = Math.ceil(Math.log10(lo) - 1e-9); e <= Math.floor(Math.log10(hi) + 1e-9); e++) ticks.push(Math.pow(10, e));
             if (ticks.length < 2) ticks = [lo, Math.sqrt(lo * hi), hi];
         } else {
-            ticks = niceTicks(lo, hi, 6);
+            ticks = niceTicks(lo, hi, this.narrow ? 4 : 6);
         }
         for (const value of ticks) {
             const norm = this.normalize(value / field.scale);
             if (norm < -1e-9 || norm > 1 + 1e-9) continue;
             const y = barY + barHeight - norm * barHeight;
-            ctx.beginPath(); ctx.moveTo(barX + barWidth, y); ctx.lineTo(barX + barWidth + 5, y); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(barX + barWidth, y); ctx.lineTo(barX + barWidth + 4, y); ctx.stroke();
             const label = this.logScaleActive() ? Number(value.toPrecision(3)).toString() : tickLabel(value, ticks);
-            ctx.fillText(label, barX + barWidth + 8, y + 4);
+            ctx.fillText(label, barX + barWidth + 7, y + 4);
         }
 
-        ctx.save();
-        ctx.translate(this.width - 12, barY + barHeight / 2);
-        ctx.rotate(-Math.PI / 2);
-        ctx.textAlign = 'center';
-        ctx.font = '12px Arial';
-        ctx.fillText(field.label + ' (' + field.unit + ')', 0, 0);
-        ctx.restore();
     }
 
     drawTooltip() {
@@ -354,9 +364,11 @@ class XTVisualization {
         const { i, j } = this.locate(x, t);
         const snapshot = this.results.xtData[j];
         const lines = [
-            `x = ${x.toFixed(3)} m, t = ${(t * 1000).toFixed(3)} ms`,
-            `p = ${(snapshot.p[i] / 1000).toPrecision(5)} kPa, T = ${snapshot.T[i].toPrecision(5)} K`,
-            `ρ = ${snapshot.rho[i].toPrecision(5)} kg/m³, u = ${snapshot.u[i].toFixed(2)} m/s`
+            `x ${x.toFixed(3)} m, t ${(t * 1000).toFixed(3)} ms`,
+            `p ${(snapshot.p[i] / 1000).toPrecision(5)} kPa`,
+            `T ${snapshot.T[i].toPrecision(5)} K`,
+            `ρ ${snapshot.rho[i].toPrecision(5)} kg/m³`,
+            `u ${snapshot.u[i].toFixed(2)} m/s`
         ];
 
         // Crosshair
@@ -376,7 +388,7 @@ class XTVisualization {
         const boxHeight = lines.length * 16 + 8;
         let boxX = this.mouseX + 12;
         let boxY = this.mouseY - boxHeight - 8;
-        if (boxX + boxWidth > this.margin.left + this.plotWidth) boxX = this.mouseX - boxWidth - 12;
+        if (boxX + boxWidth > this.width - 4) boxX = Math.max(4, this.mouseX - boxWidth - 12);
         if (boxY < this.margin.top) boxY = this.mouseY + 12;
 
         ctx.fillStyle = 'rgba(255, 255, 255, 0.93)';

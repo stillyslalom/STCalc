@@ -30,27 +30,27 @@
 <form id="shockForm" novalidate>
   <fieldset class="choice">
     <legend>Solve for</legend>
-    <label><input type="radio" name="mode" value="mach" checked> Driver pressure, from a desired Mach number</label>
-    <label><input type="radio" name="mode" value="pressure"> Mach number, from a driver pressure</label>
+    <label><input type="radio" name="mode" value="mach" checked> Driver pressure</label>
+    <label><input type="radio" name="mode" value="pressure"> Mach number</label>
   </fieldset>
 
   <div class="fields">
     <label for="drivenGas">Driven gas</label>
     <select id="drivenGas"></select>
-    <span></span>
+    <span class="unit"></span>
     <div id="drivenMixture" class="mixture full" hidden></div>
 
-    <label for="mach" data-mode="mach">Shock Mach number</label>
+    <label for="mach" data-mode="mach" title="Incident shock speed divided by the driven gas sound speed">Shock Mach number</label>
     <input id="mach" type="number" step="any" min="1" value="1.53" inputmode="decimal" data-mode="mach">
-    <span class="unit" data-mode="mach">incident shock, relative to the driven gas</span>
+    <span class="unit" data-mode="mach"></span>
 
-    <label for="p4input" data-mode="pressure" hidden>Driver pressure</label>
+    <label for="p4input" data-mode="pressure" title="Absolute pressure at diaphragm rupture" hidden>Driver pressure</label>
     <input id="p4input" type="number" step="any" min="0" value="800000" inputmode="decimal" data-mode="pressure" hidden>
-    <span class="unit" data-mode="pressure" hidden>Pa (absolute, at diaphragm rupture)</span>
+    <span class="unit" data-mode="pressure" hidden>Pa</span>
 
-    <label for="pinit">Driven pressure</label>
+    <label for="pinit" title="Absolute pressure">Driven pressure</label>
     <input id="pinit" type="number" step="any" min="0" value="101325" inputmode="decimal">
-    <span class="unit">Pa (absolute)</span>
+    <span class="unit">Pa</span>
 
     <label for="tinit">Driven temperature</label>
     <input id="tinit" type="number" step="any" min="0" value="300" inputmode="decimal">
@@ -58,29 +58,27 @@
 
     <label for="driverGas">Driver gas</label>
     <select id="driverGas"></select>
-    <span></span>
+    <span class="unit"></span>
     <div id="driverMixture" class="mixture full" hidden></div>
 
     <label for="tid">Driver temperature</label>
     <input id="tid" type="number" step="any" min="0" value="300" inputmode="decimal">
     <span class="unit">K</span>
 
-    <label for="areafact">Area contraction factor</label>
+    <label for="areafact" title="Divides the gauge driver pressure estimate. Use 1 for a constant-area tube.">Area contraction factor</label>
     <input id="areafact" type="number" step="any" min="0" value="1.35" inputmode="decimal">
-    <span class="unit">divides the gauge driver pressure estimate (1 = constant-area tube)</span>
+    <span class="unit"></span>
   </div>
 
   <div class="button-row">
     <button type="submit">Calculate</button>
     <button type="reset" class="secondary">Reset</button>
-    <button type="button" class="secondary" id="copyLinkBtn">Copy link to this setup</button>
+    <button type="button" class="secondary" id="copyLinkBtn" title="Copy a link that restores these inputs, including custom gases">Copy link</button>
   </div>
 </form>
 
 <details class="panel" id="gasLibrary">
-  <summary>Custom gases and liquids</summary>
-  <p class="hint">Saved in this browser and available in every gas list on the page. Gases are calorically perfect
-  (constant γ). Liquids use the stiffened-gas equation of state p = (γ − 1)ρe − γp<sub>∞</sub>.</p>
+  <summary title="Saved in this browser and available in every gas list. Liquids use the stiffened-gas equation of state.">Custom gases and liquids</summary>
   <form id="gasForm" class="inline-form" novalidate>
     <input type="hidden" id="gasFormId">
     <label>Name <input type="text" id="gasFormName" placeholder="e.g. Methane" maxlength="40"></label>
@@ -92,70 +90,43 @@
     </label>
     <label>γ <input type="number" step="any" id="gasFormGamma" placeholder="e.g. 1.31"></label>
     <label data-eos="ideal">Molecular weight (g/mol) <input type="number" step="any" id="gasFormMw" placeholder="e.g. 16.04"></label>
-    <label data-eos="stiffened" hidden>p<sub>∞</sub> (MPa) <input type="number" step="any" id="gasFormPinf" placeholder="e.g. 343"></label>
-    <label data-eos="stiffened" hidden>Density at 293.15 K, 1 atm (kg/m³) <input type="number" step="any" id="gasFormRho" placeholder="e.g. 998.2"></label>
+    <label data-eos="stiffened" title="Stiffening pressure in p = (γ − 1)ρe − γp∞" hidden><span>p<sub>∞</sub> (MPa)</span> <input type="number" step="any" id="gasFormPinf" placeholder="e.g. 343"></label>
+    <label data-eos="stiffened" title="At 293.15 K and 1 atm" hidden>Density (kg/m³) <input type="number" step="any" id="gasFormRho" placeholder="e.g. 998.2"></label>
     <button type="submit" id="gasFormSave">Add</button>
     <button type="button" class="secondary" id="gasFormCancel" hidden>Cancel</button>
   </form>
   <div class="messages" id="gasMessages" role="status" aria-live="polite"></div>
-  <div class="table-scroll" id="gasList"></div>
+  <div id="gasList"></div>
 </details>
 
 <div class="messages" id="shockMessages" role="status" aria-live="polite"></div>
 
 <div id="shockOutput" aria-label="Shock tube results">
 <h3>Results</h3>
-<p class="stale-note">Inputs have changed since these results were calculated.</p>
+<p class="stale-note">Inputs changed — recalculate.</p>
 <div class="results">
-<div class="table-scroll">
-<table>
+<table class="results-table">
   <thead>
-  <tr><th scope="col"></th><th scope="col">Unshocked (1)</th><th scope="col">Shocked (2)</th><th scope="col">Driver (4)</th><th scope="col">Reshocked (5)</th><th scope="col">Unit</th></tr>
+  <tr><th scope="col"></th><th scope="col">Unshocked</th><th scope="col">Shocked</th><th scope="col">Driver</th><th scope="col">Reshocked</th></tr>
   </thead>
   <tbody>
-  <tr><th scope="row">Pressure</th>
-    <td><input readonly id="pdriv" aria-label="Unshocked pressure"></td>
-    <td><input readonly id="pshocked" aria-label="Shocked pressure"></td>
-    <td><input readonly id="pfour" aria-label="Driver pressure"></td>
-    <td><input readonly id="preflect" aria-label="Reshocked pressure"></td>
-    <td class="unit">MPa</td></tr>
-  <tr><th scope="row">Temperature</th>
-    <td><input readonly id="tdriv" aria-label="Unshocked temperature"></td>
-    <td><input readonly id="tshocked" aria-label="Shocked temperature"></td>
-    <td><input readonly id="tfour" aria-label="Driver temperature"></td>
-    <td><input readonly id="treflect" aria-label="Reshocked temperature"></td>
-    <td class="unit">K</td></tr>
-  <tr><th scope="row">Density</th>
-    <td><input readonly id="ddriv" aria-label="Unshocked density"></td>
-    <td><input readonly id="dshocked" aria-label="Shocked density"></td>
-    <td><input readonly id="dfour" aria-label="Driver density"></td>
-    <td><input readonly id="dreflect" aria-label="Reshocked density"></td>
-    <td class="unit">kg/m³</td></tr>
-  <tr><th scope="row">Sound speed</th>
-    <td><input readonly id="adriv" aria-label="Unshocked sound speed"></td>
-    <td><input readonly id="ashocked" aria-label="Shocked sound speed"></td>
-    <td><input readonly id="afour" aria-label="Driver sound speed"></td>
-    <td><input readonly id="areflect" aria-label="Reshocked sound speed"></td>
-    <td class="unit">m/s</td></tr>
-  <tr><th scope="row">Velocity</th>
-    <td>0</td>
-    <td><input readonly id="ushocked" aria-label="Shocked gas velocity"></td>
-    <td>0</td>
-    <td>0</td>
-    <td class="unit">m/s</td></tr>
+  <tr><th scope="row">Pressure <span class="unit">MPa</span></th><td><output id="pdriv"></output></td><td><output id="pshocked"></output></td><td><output id="pfour"></output></td><td><output id="preflect"></output></td></tr>
+  <tr><th scope="row">Temperature <span class="unit">K</span></th><td><output id="tdriv"></output></td><td><output id="tshocked"></output></td><td><output id="tfour"></output></td><td><output id="treflect"></output></td></tr>
+  <tr><th scope="row">Density <span class="unit">kg/m³</span></th><td><output id="ddriv"></output></td><td><output id="dshocked"></output></td><td><output id="dfour"></output></td><td><output id="dreflect"></output></td></tr>
+  <tr><th scope="row">Sound speed <span class="unit">m/s</span></th><td><output id="adriv"></output></td><td><output id="ashocked"></output></td><td><output id="afour"></output></td><td><output id="areflect"></output></td></tr>
+  <tr><th scope="row">Velocity <span class="unit">m/s</span></th><td>0</td><td><output id="ushocked"></output></td><td>0</td><td>0</td></tr>
   </tbody>
 </table>
-</div>
 
 <div class="notes">
-  <div class="fields">
-    <label for="outmach">Shock Mach number</label><input readonly id="outmach"><span class="unit"></span>
-    <label for="wshocked">Incident shock speed</label><input readonly id="wshocked"><span class="unit">m/s</span>
-    <label for="wreflect">Reflected shock speed</label><input readonly id="wreflect"><span class="unit">m/s (lab frame)</span>
-    <label for="mreflect">Reflected shock Mach number</label><input readonly id="mreflect"><span class="unit"></span>
-    <label for="pfourpsig">Approximate driver pressure</label><input readonly id="pfourpsig"><span class="unit">psig, after the area contraction factor</span>
-    <label for="outgamma">Driven gas γ</label><input readonly id="outgamma"><span class="unit"></span>
-    <label for="outmw">Driven gas molecular weight</label><input readonly id="outmw"><span class="unit" id="outmwUnit">g/mol</span>
+  <div class="fields compact">
+    <label for="outmach">Shock Mach number</label><output id="outmach"></output><span class="unit"></span>
+    <label for="wshocked">Incident shock speed</label><output id="wshocked"></output><span class="unit">m/s</span>
+    <label for="wreflect" title="Lab frame">Reflected shock speed</label><output id="wreflect"></output><span class="unit">m/s</span>
+    <label for="mreflect">Reflected shock Mach number</label><output id="mreflect"></output><span class="unit"></span>
+    <label for="pfourpsig" title="Gauge pressure divided by the area contraction factor">Approximate driver pressure</label><output id="pfourpsig"></output><span class="unit">psig</span>
+    <label for="outgamma">Driven gas γ</label><output id="outgamma"></output><span class="unit"></span>
+    <label for="outmw" id="outmwLabel">Driven gas molecular weight</label><output id="outmw"></output><span class="unit">g/mol</span>
   </div>
   <button type="button" class="secondary small" id="showEquationsBtn">View equations</button>
 </div>
@@ -166,20 +137,17 @@
 <!-- ============================ Interface / RMI ============================ -->
 <details class="tool" id="interface">
 <summary>Shocked interface (RMI)</summary>
-<p class="lead">Conditions after the incident shock from the calculation above crosses an interface between the driven gas
-and a second gas or liquid, from the exact Riemann solution, with Richtmyer–Meshkov growth estimates for a
-single-mode perturbation.</p>
 
 <form id="interfaceForm" novalidate>
   <div class="fields">
-    <label for="interfaceHeavyGas">Downstream gas</label>
+    <label for="interfaceHeavyGas" title="The material beyond the interface: the heavy gas in a light-to-heavy experiment">Downstream gas</label>
     <select id="interfaceHeavyGas"></select>
-    <span class="unit">the material beyond the interface (the heavy gas in a light-to-heavy experiment)</span>
+    <span class="unit"></span>
     <div id="interfaceHeavyMixture" class="mixture full" hidden></div>
 
-    <label for="interfaceHeavyTemp">Downstream temperature</label>
+    <label for="interfaceHeavyTemp" title="Pressure equals the driven pressure">Downstream temperature</label>
     <input type="number" id="interfaceHeavyTemp" value="300" min="0" step="any" inputmode="decimal">
-    <span class="unit">K (pressure equals the driven pressure)</span>
+    <span class="unit">K</span>
 
     <label for="perturbWavelength">Perturbation wavelength λ</label>
     <input type="number" id="perturbWavelength" value="10" min="0" step="any" inputmode="decimal">
@@ -189,41 +157,35 @@ single-mode perturbation.</p>
     <input type="number" id="perturbAmplitude" value="0.5" min="0" step="any" inputmode="decimal">
     <span class="unit">mm</span>
 
-    <label for="rmiDownstreamDist">Diagnostic distance</label>
+    <label for="rmiDownstreamDist" title="Distance downstream of the initial interface position">Diagnostic distance</label>
     <input type="number" id="rmiDownstreamDist" value="200" min="0" step="any" inputmode="decimal">
-    <span class="unit">mm downstream of the initial interface position</span>
+    <span class="unit">mm</span>
   </div>
-  <div class="button-row"><button type="submit">Calculate interface</button></div>
+  <div class="button-row"><button type="submit">Calculate</button></div>
 </form>
 
 <div class="messages" id="interfaceMessages" role="status" aria-live="polite"></div>
 
 <div id="interfaceResults" hidden>
-  <h3>Interface results</h3>
-  <div class="table-scroll">
-  <table>
-    <tbody>
-    <tr><th scope="row">Interface velocity</th><td><input readonly id="interfaceVelocity"></td><td class="unit">m/s</td></tr>
-    <tr><th scope="row">Interface pressure</th><td><input readonly id="interfacePressure"></td><td class="unit">MPa</td></tr>
-    <tr><th scope="row">Post-shock Atwood number</th><td><input readonly id="atwoodNumber"></td><td class="unit"></td></tr>
-    <tr><th scope="row">Reflected wave</th><td colspan="2" id="waveConfigLeft"></td></tr>
-    <tr><th scope="row">Transmitted wave</th><td colspan="2" id="waveConfigRight"></td></tr>
-    </tbody>
-  </table>
+  <h3>Results</h3>
+  <div class="fields compact">
+    <label for="interfaceVelocity">Interface velocity</label><output id="interfaceVelocity"></output><span class="unit">m/s</span>
+    <label for="interfacePressure">Interface pressure</label><output id="interfacePressure"></output><span class="unit">MPa</span>
+    <label for="atwoodNumber" title="From post-wave densities">Atwood number</label><output id="atwoodNumber"></output><span class="unit"></span>
+    <label for="waveConfigLeft" title="Travels back into the driven gas">Reflected wave</label><output id="waveConfigLeft"></output><span class="unit"></span>
+    <label for="waveConfigRight" title="Travels into the downstream gas">Transmitted wave</label><output id="waveConfigRight"></output><span class="unit"></span>
   </div>
-  <div class="table-scroll">
-  <table>
+  <table class="results-table">
     <thead>
-    <tr><th scope="col"></th><th scope="col">Driven gas (after reflected wave)</th><th scope="col">Downstream gas (after transmitted wave)</th><th scope="col">Unit</th></tr>
+    <tr><th scope="col"></th><th scope="col" title="Behind the reflected wave">Driven gas</th><th scope="col" title="Behind the transmitted wave">Downstream gas</th></tr>
     </thead>
     <tbody>
-    <tr><th scope="row">Pressure</th><td><input readonly id="lightGasPressure"></td><td><input readonly id="heavyGasPressure"></td><td class="unit">MPa</td></tr>
-    <tr><th scope="row">Temperature</th><td><input readonly id="lightGasTemp"></td><td><input readonly id="heavyGasTemp"></td><td class="unit">K</td></tr>
-    <tr><th scope="row">Density</th><td><input readonly id="lightGasDensity"></td><td><input readonly id="heavyGasDensity"></td><td class="unit">kg/m³</td></tr>
-    <tr><th scope="row">Sound speed</th><td><input readonly id="lightGasSound"></td><td><input readonly id="heavyGasSound"></td><td class="unit">m/s</td></tr>
+    <tr><th scope="row">Pressure <span class="unit">MPa</span></th><td><output id="lightGasPressure"></output></td><td><output id="heavyGasPressure"></output></td></tr>
+    <tr><th scope="row">Temperature <span class="unit">K</span></th><td><output id="lightGasTemp"></output></td><td><output id="heavyGasTemp"></output></td></tr>
+    <tr><th scope="row">Density <span class="unit">kg/m³</span></th><td><output id="lightGasDensity"></output></td><td><output id="heavyGasDensity"></output></td></tr>
+    <tr><th scope="row">Sound speed <span class="unit">m/s</span></th><td><output id="lightGasSound"></output></td><td><output id="heavyGasSound"></output></td></tr>
     </tbody>
   </table>
-  </div>
 
   <h3>RMI growth</h3>
   <dl class="stats panel">
@@ -231,14 +193,14 @@ single-mode perturbation.</p>
     <div><dt>ka₀</dt><dd id="rmiKa0"></dd></div>
     <div><dt>Initial growth rate</dt><dd><span id="rmiGrowthRate"></span> m/s</dd></div>
     <div><dt>Doubling time</dt><dd><span id="rmiDoublingTime"></span> ms</dd></div>
-    <div><dt>Time to reach diagnostic</dt><dd><span id="rmiTimeAtLocation"></span> ms</dd></div>
-    <div><dt>Amplitude there, linear</dt><dd><span id="rmiAmplitudeLinear"></span> mm</dd></div>
-    <div><dt>Amplitude there, nonlinear</dt><dd><span id="rmiAmplitudeNonlinear"></span> mm</dd></div>
+    <div><dt>Arrival time</dt><dd><span id="rmiTimeAtLocation"></span> ms</dd></div>
+    <div><dt title="Richtmyer impulsive model, at arrival">Linear amplitude</dt><dd><span id="rmiAmplitudeLinear"></span> mm</dd></div>
+    <div><dt title="Dimonte–Ramaprabhu model, at arrival">Nonlinear amplitude</dt><dd><span id="rmiAmplitudeNonlinear"></span> mm</dd></div>
   </dl>
-  <canvas id="rmiGrowthCanvas" class="plot" width="800" height="400" role="img" aria-label="Perturbation amplitude versus time"></canvas>
+  <canvas id="rmiGrowthCanvas" class="plot" role="img" aria-label="Perturbation amplitude versus time"></canvas>
   <p class="legend">
-    <span><i style="background:#0066cc"></i>Linear (Richtmyer impulsive model)</span>
-    <span><i style="background:#1e7e34"></i>Nonlinear (Dimonte–Ramaprabhu)</span>
+    <span><i style="background:#0066cc"></i>Linear</span>
+    <span><i style="background:#1e7e34"></i>Nonlinear</span>
   </p>
 </div>
 </details>
@@ -246,33 +208,31 @@ single-mode perturbation.</p>
 <!-- ============================ X-T diagram ============================ -->
 <details class="tool" id="xt">
 <summary>x-t diagram</summary>
-<p class="lead">Simulates the tube in one dimension by solving the compressible Euler equations (finite volume, HLLC flux,
-closed ends). Slabs are listed from the driver end wall to the driven end wall.</p>
 
-<h3>Initial slabs</h3>
+<h3 title="Listed from the driver end wall to the driven end wall">Initial slabs</h3>
 <div class="button-row">
-  <button type="button" class="secondary" id="xtImportBtn">Use driver and driven states from the shock tube calculation</button>
+  <button type="button" class="secondary" id="xtImportBtn" title="Set slabs 1 and 2 to the driver and driven states of the shock tube calculation">Import from shock tube</button>
 </div>
 <div id="xtSlabList"></div>
 <button type="button" class="secondary" id="xtAddSlabBtn">Add slab</button>
 
-<h3>Simulation settings</h3>
+<h3>Settings</h3>
 <div class="fields">
   <label for="xtSimTime">Simulated time</label>
   <input type="number" id="xtSimTime" value="20" min="0" step="any" inputmode="decimal">
   <span class="unit">ms</span>
 
-  <label for="xtGridPoints">Grid cells</label>
+  <label for="xtGridPoints" title="50 to 5000. Run time grows with the square of this.">Grid cells</label>
   <input type="number" id="xtGridPoints" value="500" min="50" max="5000" step="50" inputmode="numeric">
-  <span class="unit">50–5000; run time grows with the square of this</span>
+  <span class="unit"></span>
 
-  <label for="xtSnapshotInterval">Snapshot interval</label>
+  <label for="xtSnapshotInterval" title="Time between stored frames; also the probe sampling interval">Snapshot interval</label>
   <input type="number" id="xtSnapshotInterval" value="0.1" min="0" step="any" inputmode="decimal">
-  <span class="unit">ms between stored frames (also the probe sampling interval)</span>
+  <span class="unit">ms</span>
 
-  <label for="xtProbes">Probe positions</label>
+  <label for="xtProbes" title="Optional. Distances from the driver end wall, comma separated.">Probe positions</label>
   <input type="text" id="xtProbes" value="" placeholder="e.g. 4.5, 8.9" inputmode="decimal">
-  <span class="unit">m from the driver end wall, comma separated (optional)</span>
+  <span class="unit">m</span>
 </div>
 
 <details class="panel">
@@ -280,27 +240,27 @@ closed ends). Slabs are listed from the driver end wall to the driven end wall.<
   <div class="fields">
     <label for="xtIntegrator">Time integrator</label>
     <select id="xtIntegrator">
-      <option value="SSP" selected>SSP Runge–Kutta, 3rd order</option>
-      <option value="RK2">Runge–Kutta, 2nd order</option>
+      <option value="SSP" selected>SSP-RK3</option>
+      <option value="RK2">RK2</option>
     </select>
     <span class="unit"></span>
 
-    <label for="xtCflNumber">CFL number</label>
+    <label for="xtCflNumber" title="0.8 suits SSP; use 0.4 with RK2">CFL number</label>
     <input type="number" id="xtCflNumber" value="0.8" min="0.05" max="0.9" step="0.05" inputmode="decimal">
-    <span class="unit">0.8 suits SSP; use 0.4 with RK2</span>
+    <span class="unit"></span>
 
-    <label for="xtInterfaceMethod">Interface treatment</label>
+    <label for="xtInterfaceMethod" id="xtInterfaceMethodLabel">Interface treatment</label>
     <select id="xtInterfaceMethod">
-      <option value="mixed" selected>Mixed cell (volume fractions)</option>
-      <option value="sharp">Sharp (tracer regions)</option>
+      <option value="mixed" selected>Mixed cell</option>
+      <option value="sharp">Sharp</option>
     </select>
-    <span class="unit" id="interfaceMethodInfo"></span>
+    <span class="unit"></span>
   </div>
 </details>
 
 <div class="button-row">
   <button type="button" id="xtRunBtn">Run simulation</button>
-  <button type="button" class="secondary" id="xtClearBtn">Clear results</button>
+  <button type="button" class="secondary" id="xtClearBtn">Clear</button>
 </div>
 
 <div class="progress" id="xtProgressContainer" hidden><div id="xtProgressFill">0%</div></div>
@@ -316,15 +276,13 @@ closed ends). Slabs are listed from the driver end wall to the driven end wall.<
         <option value="u">Velocity</option>
       </select>
     </label>
-    <label><input type="checkbox" id="xtLogScale"> Logarithmic colour scale</label>
+    <label><input type="checkbox" id="xtLogScale"> Log scale</label>
   </div>
-  <canvas id="xtCanvas" class="plot" role="img" aria-label="x-t diagram"></canvas>
-  <p class="legend"><span><i style="background:#fff;outline:1px solid #888"></i>Material interfaces</span>
-     <span id="xtProbeLegend" hidden><i style="background:#35c9ff"></i>Probe positions</span></p>
+  <canvas id="xtCanvas" class="plot" role="img" aria-label="x-t diagram: white lines are material interfaces, dashed lines are probes" title="White lines: material interfaces. Dashed lines: probes."></canvas>
 
   <div id="xtProbeContainer" hidden>
     <h3>Probe traces</h3>
-    <canvas id="xtProbeCanvas" class="plot" width="1000" height="360" role="img" aria-label="Field history at each probe"></canvas>
+    <canvas id="xtProbeCanvas" class="plot" role="img" aria-label="Field history at each probe"></canvas>
   </div>
 
   <dl class="stats panel" id="xtStatsContent"></dl>
@@ -343,22 +301,19 @@ closed ends). Slabs are listed from the driver end wall to the driven end wall.<
 <!-- ============================ Timing ============================ -->
 <section class="tool" id="timing">
 <h2>Timing</h2>
-<p class="lead">Measured shock speed from two pressure transducers, and the delays to use for triggering diagnostics.
-The measured Mach number and the interface delay use the sound speed and post-shock gas velocity from the shock tube
-calculation above.</p>
 
 <form id="timingForm" novalidate>
   <div class="fields">
-    <label for="xwave">Distance between pressure transducers</label>
+    <label for="xwave" title="Distance between the two pressure transducers">Transducer spacing</label>
     <input id="xwave" type="number" step="any" min="0" value="0.654" inputmode="decimal"><span class="unit">m</span>
 
-    <label for="twave">Shock transit time between transducers</label>
+    <label for="twave" title="Time for the shock to pass between the two transducers">Shock transit time</label>
     <input id="twave" type="number" step="any" min="0" inputmode="decimal"><span class="unit">ms</span>
 
-    <label for="xtrig">Trigger transducer to window centreline</label>
+    <label for="xtrig" title="Distance from the trigger transducer to the window centreline">Trigger to window</label>
     <input id="xtrig" type="number" step="any" min="0" value="0.859" inputmode="decimal"><span class="unit">m</span>
 
-    <label for="xint">Trigger transducer to interface</label>
+    <label for="xint" title="Distance from the trigger transducer to the interface">Trigger to interface</label>
     <input id="xint" type="number" step="any" min="0" value="0.4" inputmode="decimal"><span class="unit">m</span>
   </div>
   <div class="button-row">
@@ -367,19 +322,17 @@ calculation above.</p>
   </div>
 </form>
 <div class="messages" id="timingMessages" role="status" aria-live="polite"></div>
-<div class="fields">
-  <label for="wactual">Measured shock speed</label><input readonly id="wactual"><span class="unit">m/s</span>
-  <label for="mactual">Measured Mach number</label><input readonly id="mactual"><span class="unit"></span>
-  <label for="tdelayshock">Delay until the shock reaches the window</label><input readonly id="tdelayshock"><span class="unit">ms after trigger</span>
-  <label for="tdelaymembrane">Delay until the interface reaches the window</label><input readonly id="tdelaymembrane"><span class="unit">ms after trigger</span>
+<div class="fields compact">
+  <label for="wactual">Shock speed</label><output id="wactual"></output><span class="unit">m/s</span>
+  <label for="mactual" title="Uses the unshocked sound speed from the shock tube calculation">Mach number</label><output id="mactual"></output><span class="unit"></span>
+  <label for="tdelayshock" title="Time after trigger until the shock reaches the window">Shock delay</label><output id="tdelayshock"></output><span class="unit">ms</span>
+  <label for="tdelaymembrane" title="Time after trigger until the interface reaches the window; uses the post-shock gas velocity from the shock tube calculation">Interface delay</label><output id="tdelaymembrane"></output><span class="unit">ms</span>
 </div>
 </section>
 
 <!-- ============================ Boost tank ============================ -->
 <section class="tool" id="boost">
 <h2>Boost tank</h2>
-<p class="lead">Fill pressures for rupturing the diaphragm by discharging a boost tank into the driver (isothermal,
-ideal-gas estimate; independent of the gas used).</p>
 
 <form id="boostForm" novalidate>
   <div class="fields">
@@ -389,14 +342,14 @@ ideal-gas estimate; independent of the gas used).</p>
     <label for="boostvol">Boost tank volume</label>
     <input id="boostvol" type="number" step="any" min="0" value="0.0538" inputmode="decimal"><span class="unit">m³</span>
 
-    <label for="prupture">Diaphragm rupture pressure</label>
+    <label for="prupture">Rupture pressure</label>
     <input id="prupture" type="number" step="any" inputmode="decimal"><span class="unit">psig</span>
 
-    <label for="percless">Pre-boost margin</label>
-    <input id="percless" type="number" step="any" min="0" value="5" inputmode="decimal"><span class="unit">% below rupture pressure</span>
+    <label for="percless" title="Percent below the rupture pressure">Pre-boost margin</label>
+    <input id="percless" type="number" step="any" min="0" value="5" inputmode="decimal"><span class="unit">%</span>
 
-    <label for="percmore">Post-boost margin</label>
-    <input id="percmore" type="number" step="any" min="0" value="20" inputmode="decimal"><span class="unit">% above rupture pressure</span>
+    <label for="percmore" title="Percent above the rupture pressure">Post-boost margin</label>
+    <input id="percmore" type="number" step="any" min="0" value="20" inputmode="decimal"><span class="unit">%</span>
   </div>
   <div class="button-row">
     <button type="submit">Calculate</button>
@@ -404,10 +357,10 @@ ideal-gas estimate; independent of the gas used).</p>
   </div>
 </form>
 <div class="messages" id="boostMessages" role="status" aria-live="polite"></div>
-<div class="fields">
-  <label for="ppreboost">Pre-boost driver pressure</label><input readonly id="ppreboost"><span class="unit">psig</span>
-  <label for="ppostboost">Post-boost driver pressure</label><input readonly id="ppostboost"><span class="unit">psig</span>
-  <label for="pboosttank">Required boost tank pressure</label><input readonly id="pboosttank"><span class="unit">psig</span>
+<div class="fields compact">
+  <label for="ppreboost">Pre-boost driver pressure</label><output id="ppreboost"></output><span class="unit">psig</span>
+  <label for="ppostboost">Post-boost driver pressure</label><output id="ppostboost"></output><span class="unit">psig</span>
+  <label for="pboosttank" title="Isothermal ideal-gas estimate; independent of the gas">Boost tank pressure</label><output id="pboosttank"></output><span class="unit">psig</span>
 </div>
 </section>
 
