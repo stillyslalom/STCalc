@@ -224,13 +224,6 @@ function runXTSimulation() {
     };
 
     let solver;
-    try {
-        solver = new EulerSolver(config);
-        solver.initialize(config.slabs);
-    } catch (error) {
-        fail(error);
-        return;
-    }
 
     // Run in short slices so the page stays responsive and the bar can repaint
     const slice = function () {
@@ -268,7 +261,18 @@ function runXTSimulation() {
             fail(error);
         }
     };
-    setTimeout(slice, 0);
+    // Setting up can take a moment (the start is computed on a finer grid
+    // for some gases and geometries), so let the button repaint first
+    setTimeout(function () {
+        try {
+            solver = new EulerSolver(config);
+            solver.initialize(config.slabs);
+        } catch (error) {
+            fail(error);
+            return;
+        }
+        slice();
+    }, 0);
 }
 
 function displayXTStatistics(results) {

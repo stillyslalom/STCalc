@@ -58,11 +58,14 @@ class EulerSolver {
         this.tabulated = false;
         this.alphaAtHalfStep = false;
 
-        // Start from the exact solution rather than from bare jumps; see
-        // startFromExactSolution()
+        // Start with a pre-formed shock rather than from bare jumps; see
+        // "Starting a run" below
         this.exactStart = config.exactStart !== false;
-        this.formedShockCells = config.formedShockCells || 8;   // half-width of the installed profile
+        this.formedShockCells = config.formedShockCells || 8;   // cells kept on either side of the settled shock
         this.startTime = 0;
+        // Where no exact solution applies; see startFromFineGrid()
+        this.fineStartLevels = config.fineStartLevels === undefined ? 2 : config.fineStartLevels;
+        this.fineStartRatio = config.fineStartRatio || 4;
 
         // Cross-sectional area (quasi-one-dimensional flow). Slabs may have
         // different areas; each change is a linear transition of this length
@@ -71,6 +74,7 @@ class EulerSolver {
         // loses several percent of the shock strength numerically.
         this.variableArea = false;
         this.areaTransition = config.areaTransition;
+        this.areaFunction = config.areaFunction;
         this.areaCell = null;
         this.areaFace = null;
 
@@ -135,6 +139,7 @@ class EulerSolver {
             materials[s].R = th.R;
             materials[s].mw = th.mw;
             materials[s].table = EulerSolver.energyTable(th);
+            materials[s].thermo = slab.thermo;
             this.tabulated = true;
         });
 
@@ -182,7 +187,6 @@ class EulerSolver {
         // Tube cross-section: constant over each slab's initial extent, with a
         // linear ramp across each boundary where it changes
         const areas = slabs.map(slab => slab.area > 0 ? slab.area : 1);
-        this.variableArea = areas.some(a => a !== areas[0]);
         this.areaFace = new Float64Array(this.nx + 1);
         this.areaCell = new Float64Array(this.nx);
         const wanted = this.areaTransition > 0 ? this.areaTransition : 0.04 * totalLength;
@@ -195,16 +199,18 @@ class EulerSolver {
                 ? { x0: edges[b] - width, x1: edges[b], a0: areas[b - 1], a1: areas[b] }
                 : { x0: edges[b], x1: edges[b] + width, a0: areas[b - 1], a1: areas[b] });
         }
-        for (let i = 0; i <= this.nx; i++) {
-            const x = i * this.dx;
+        // (A calculation covering part of another's tube is given that one's area.)
+        const areaAt = this.areaFunction || ((x) => {
             let s = 0;
             while (s < slabs.length - 1 && x >= edges[s + 1]) s++;
             let area = areas[s];
             for (const r of ramps) {
                 if (x >= r.x0 && x <= r.x1) area = r.a0 + (r.a1 - r.a0) * (x - r.x0) / (r.x1 - r.x0);
             }
-            this.areaFace[i] = area;
-        }
+            return area;
+        });
+        for (let i = 0; i <= this.nx; i++) this.areaFace[i] = areaAt(i * this.dx);
+        this.variableArea = this.areaFace.some(a => a !== this.areaFace[0]);
         for (let i = 0; i < this.nx; i++) this.areaCell[i] = 0.5 * (this.areaFace[i] + this.areaFace[i + 1]);
 
         for (let i = 0; i < this.nx; i++) {
@@ -267,11 +273,19 @@ class EulerSolver {
         this.nextXTStore = this.xtInterval;
 
         // (The sharp method cannot represent the mixed cell at the moved contact.)
-        if (this.exactStart && mixed) this.startFromExactSolution(slabs, edges);
+        this.initialState = new Float64Array(this.U);
+        if (this.exactStart && mixed) {
+            const began = Date.now();
+            const start = this.startProblems(slabs);
+            if (start && this.startFromExactSolution(start, edges) === false && this.fineStartLevels > 0) {
+                this.startFromFineGrid(slabs, edges, start);
+            }
+            this.wallTime = (Date.now() - began) / 1000;
+        }
     }
 
-    /**
-     * Start from the exact solution instead of from bare discontinuities.
+    /*
+     * Starting a run
      *
      * A shock-capturing scheme cannot hold a perfectly sharp shock: in its
      * first steps the jump spreads into a profile two or three cells wide, and
@@ -280,20 +294,31 @@ class EulerSolver {
      * the driver gas, where it moves at the speed of the expansion's tail and
      * stays beside it as a dip of a few percent in pressure.
      *
-     * To avoid it, each slab boundary is replaced by the exact solution of
-     * its Riemann problem at a time t0, and the strongest shock is installed
-     * already in the scheme's own settled profile, taken from a short side
-     * calculation of that shock alone. The simulation then runs from t0;
-     * snapshots before t0 are filled from the exact solution.
+     * To avoid it the run starts at a time t0 > 0 from a state in which the
+     * strongest shock already has the scheme's own settled profile, taken
+     * from a short side calculation of that shock alone, and everything else
+     * is resolved more finely than the grid:
      *
-     * Applies to constant-gamma and stiffened materials away from area
-     * changes, when the shock separates from the contact quickly enough.
-     * Otherwise (temperature-dependent gases, a heavy driven gas whose shock
-     * and contact stay close, patterns that would reach another boundary, a
-     * wall or an area change) the slabs are left as plain jumps.
+     * - startFromExactSolution: constant-gamma and stiffened materials in a
+     *   tube of constant area. The state at t0 is the exact solution of each
+     *   slab boundary's Riemann problem.
+     * - startFromFineGrid: otherwise (temperature-dependent gases, an area
+     *   change beside the boundary). The state at t0 is computed on a grid
+     *   several times finer, itself started the same way.
+     *
+     * Snapshots before t0 come from the same source. If neither applies (no
+     * shock into gas at rest, or its pattern would reach a wall or another
+     * boundary before the shock is clear of the contact) the slabs are left
+     * as plain jumps.
      */
-    startFromExactSolution(slabs, edges) {
-        if (this.tabulated) return;
+
+    /**
+     * The Riemann problem at every slab boundary with a pressure or velocity
+     * jump, and the strongest shock running into gas at rest. For
+     * temperature-dependent gases these are constant-gamma estimates.
+     * @returns {{problems: Array, shock: Object, maxSpeed: number}|null}
+     */
+    startProblems(slabs) {
         const mats = this.materialProperties;
         const dx = this.dx;
         const side = (s) => ({
@@ -328,18 +353,6 @@ class EulerSolver {
             maxSpeed = Math.max(maxSpeed, Math.abs(vLeft), Math.abs(vRight),
                 Math.abs(sol.uStar) + sol.leftPost.a, Math.abs(sol.uStar) + sol.rightPost.a);
         }
-        if (problems.length === 0) return;
-
-        // A pattern is usable at time t if it stays inside its two slabs, clear of walls and area changes
-        const margin = 2 * dx;
-        const fits = (q, t) => {
-            const x0 = edges[q.b], xa = x0 + q.vLeft * t, xb = x0 + q.vRight * t;
-            if (xa - margin < edges[q.b - 1] || xb + margin > edges[q.b + 1]) return false;
-            const first = Math.max(0, Math.floor(xa / dx) - 1), last = Math.min(this.nx - 1, Math.floor(xb / dx) + 1);
-            for (let i = first; i <= last + 1; i++) if (this.areaFace[i] !== this.areaFace[first]) return false;
-            return true;
-        };
-
         // The strongest shock, if it runs into gas at rest, is the one installed pre-formed
         let shock = null;
         for (const q of problems) {
@@ -352,34 +365,73 @@ class EulerSolver {
             }
         }
 
-        if (!shock) return;
+        return shock ? { problems: problems, shock: shock, maxSpeed: maxSpeed } : null;
+    }
+
+    /**
+     * Start from the exact solution of the Riemann problems found by
+     * startProblems(): constant-gamma and stiffened materials away from area
+     * changes. See initialize().
+     * @returns {boolean|null} whether the start was applied; null if the
+     *   shock has no settled profile to install, so that no start would help
+     */
+    startFromExactSolution(start, edges) {
+        if (this.tabulated) return false;
+        const { problems, shock, maxSpeed } = start;
+        const dx = this.dx;
+
+        // A pattern is usable at time t if it stays inside its two slabs, clear of walls and area changes
+        const margin = 2 * dx;
+        const fits = (q, t) => {
+            const x0 = edges[q.b], xa = x0 + q.vLeft * t, xb = x0 + q.vRight * t;
+            if (xa - margin < edges[q.b - 1] || xb + margin > edges[q.b + 1]) return false;
+            const first = Math.max(0, Math.floor(xa / dx) - 1), last = Math.min(this.nx - 1, Math.floor(xb / dx) + 1);
+            for (let i = first; i <= last + 1; i++) if (this.areaFace[i] !== this.areaFace[first]) return false;
+            return true;
+        };
+
 
         // The settled shock profile, from a side calculation with the same time step.
         // Without it an exact start does not help, so the plain jumps are kept.
         const m = this.formedShockCells;
         const formed = this.formedShockProfile(shock, this.cfl * dx / maxSpeed, m);
-        if (!formed) return;
+        if (!formed) return null;
         const profile = formed.cells;
 
-        // Start once the shock is clear of the contact. A settled numerical
-        // shock holds the mass of an exact shock slightly displaced from the
-        // cell face (formed.shift cells ahead), so t0 puts the exact shock
-        // there and the installed profile conserves mass.
+        // Start once the shock is clear of the contact: a few cells of shocked
+        // gas behind the shock come from the profile, with two more up to the
+        // contact. Fewer cells when the shocked gas is slow to open up (a
+        // heavy driven gas) or the run is short. A settled numerical shock
+        // holds the mass of an exact shock slightly displaced from the cell
+        // face (shift cells ahead), so t0 puts the exact shock there and the
+        // installed profile conserves mass.
         const x0 = edges[shock.q.b];
         const speed = Math.abs(shock.v);
-        const tMin = (m + 4) * dx / Math.abs(shock.v - shock.q.sol.uStar);
         // Distance from the boundary to cell faces, measured along the shock's direction of travel
         const offset = shock.dir > 0 ? Math.ceil(x0 / dx - 1e-9) * dx - x0 : x0 - Math.floor(x0 / dx + 1e-9) * dx;
-        const facesAhead = Math.max(1, Math.ceil((speed * tMin - offset) / dx - formed.shift));
-        const t0 = (offset + (facesAhead + formed.shift) * dx) / speed;
+        let mb = 0, t0 = 0, facesAhead = 0;
+        for (let behind = Math.min(3, m); behind >= 1 && !mb; behind--) {
+            let excess = 0;
+            for (let k = m - behind; k < 2 * m; k++) excess += profile[k][0] - (k < m ? shock.post.rho : shock.pre.rho);
+            const shift = excess / (shock.post.rho - shock.pre.rho);
+            const tMin = (behind + 2) * dx / Math.abs(shock.v - shock.q.sol.uStar);
+            const faces = Math.max(1, Math.ceil((speed * tMin - offset) / dx - shift));
+            const t = (offset + (faces + shift) * dx) / speed;
+            const limit = (behind > 1 ? 0.25 : 0.9) * this.finalTime;
+            if (t > 0 && t <= limit && problems.every(q => fits(q, t))) {
+                mb = behind;
+                t0 = t;
+                facesAhead = faces;
+            }
+        }
+        if (!mb) return false;
         const shockFace = shock.dir > 0
             ? Math.round((x0 + offset) / dx) + facesAhead
             : Math.round((x0 - offset) / dx) - facesAhead;
-        if (!(t0 > 0) || t0 > 0.5 * this.finalTime || !problems.every(q => fits(q, t0))) return;
         const active = problems;
 
         // Snapshots before t0 come straight from the exact solution
-        const initial = new Float64Array(this.U);
+        const initial = this.initialState;
         const setTime = (t) => {
             this.U.set(initial);
             for (const q of active) {
@@ -400,7 +452,7 @@ class EulerSolver {
 
         {
             const nvar = this.nvar, M = this.numMaterials;
-            for (let k = 0; k < 2 * m; k++) {
+            for (let k = m - mb; k < 2 * m; k++) {
                 // The side calculation has the shock running in +x; mirror it for a left-running shock
                 const cell = shock.dir > 0 ? shockFace - m + k : shockFace + m - 1 - k;
                 const idx = cell * nvar, v = profile[k];
@@ -413,6 +465,271 @@ class EulerSolver {
 
         this.startTime = t0;
         this.updateGasProperties();
+        return true;
+    }
+
+    /**
+     * Start from a calculation on a grid `fineStartRatio` times finer.
+     *
+     * The finer calculation has its own start-up error, but that pulse is as
+     * many times narrower, and so as many times weaker once averaged onto
+     * this grid; it is in turn started from a still finer one
+     * (fineStartLevels deep). It runs until its shock has reached a chosen
+     * cell face, clear of the contact; its state is then averaged onto this
+     * grid and the shock, which would otherwise be sharp here, is replaced by
+     * this grid's settled profile. The hand-over time is the moment the
+     * finer calculation holds exactly the profile's mass in those cells.
+     * @returns {boolean} whether the start was applied
+     */
+    startFromFineGrid(slabs, edges, start) {
+        const shock = start.shock, dir = shock.dir, b = shock.q.b;
+        const m = this.formedShockCells, r = this.fineStartRatio;
+        const dx = this.dx, nx = this.nx, nvar = this.nvar, M = this.numMaterials;
+        const mat = this.materialProperties[shock.material];
+
+        // The face where the shock is handed over: far enough for mb cells of
+        // shocked gas and a few more up to the (smeared) contact, and past
+        // any area change. Fewer cells when the shocked gas is slow to open
+        // up (a heavy driven gas) or the run is short.
+        const separation = Math.abs(shock.v - shock.q.sol.uStar), speed = Math.abs(shock.v);
+        const x0 = edges[b];
+        const boundaryFace = dir > 0 ? Math.ceil(x0 / dx - 1e-9) : Math.floor(x0 / dx + 1e-9);
+        const slabEnd = dir > 0 ? Math.min(nx, Math.floor(edges[b + 1] / dx + 1e-9)) : Math.max(0, Math.ceil(edges[b - 1] / dx - 1e-9));
+        const room = (f) => dir * (slabEnd - f) >= m + 3;
+        let mb = 0, face = 0, expected = 0;
+        const uniform = (f, behind) => {
+            for (let i = f - dir * (behind + 1); i !== f + dir * (m + 3); i += dir) {
+                if (this.areaFace[i] !== this.areaFace[f]) return false;
+            }
+            return true;
+        };
+        for (const [behind, gap, limit] of [[2, 5, 0.25], [1, 3, 0.8]]) {
+            let f = boundaryFace + dir * Math.ceil((behind + gap) * speed / separation);
+            while (room(f) && !uniform(f, behind)) f += dir;
+            const time = Math.abs(f - boundaryFace) * dx / speed;
+            if (room(f) && time <= limit * this.finalTime) {
+                mb = Math.min(behind, m);
+                face = f;
+                expected = time;
+                break;
+            }
+        }
+        if (!mb) return false;
+        // Nothing to gain unless a shock of about this strength has a settled profile
+        const estimate = this.shockedState(mat, shock.pre, shock.q.sol.pStar);
+        if (!estimate || !this.formedShockProfile(
+            { material: shock.material, pre: shock.pre, post: estimate, v: estimate.speed }, this.cfl * dx / start.maxSpeed, m)) return false;
+        // (with allowance for handing over a few cells later; see below)
+        const timeLimit = Math.min(1.4 * (expected + 6 * dx / speed), 0.95 * this.finalTime);
+        // Profile cell k (0 .. 2m-1, shock running toward larger k) on this grid
+        const cellOf = (k) => dir > 0 ? face - m + k : face + m - 1 - k;
+
+        // The fine grid need only cover what the waves can reach by then. (A
+        // second boundary with a jump has to start at the same time, so the
+        // whole tube is covered.)
+        let c0 = 0, c1 = nx;
+        if (start.problems.length === 1 && slabs.every(slab => !slab.velocity)) {
+            const reach = Math.ceil(1.6 * start.maxSpeed * timeLimit / dx) + 4;
+            c0 = Math.max(0, Math.floor(x0 / dx) - reach);
+            c1 = Math.min(nx, Math.ceil(x0 / dx) + reach);
+        }
+        const xa = c0 * dx, xb = c1 * dx;
+        const pieces = [], source = [];
+        slabs.forEach((slab, s) => {
+            const length = Math.min(xb, edges[s + 1]) - Math.max(xa, edges[s]);
+            if (length > 1e-6 * dx) {
+                pieces.push(Object.assign({}, slab, { length: length }));
+                source.push(s);
+            }
+        });
+        // The same tube as on this grid: linear between this grid's faces
+        const fineArea = (x) => {
+            const position = (x + xa) / dx;
+            const i = Math.min(nx - 1, Math.max(0, Math.floor(position)));
+            return this.areaFace[i] + (this.areaFace[i + 1] - this.areaFace[i]) * (position - i);
+        };
+        const child = new EulerSolver({
+            nx: (c1 - c0) * r, cfl: this.cfl, order: this.order, integrator: this.integrator.name,
+            interfaceMethod: 'mixed', finalTime: this.finalTime, xtInterval: this.xtInterval,
+            areaFunction: this.variableArea ? fineArea : undefined, formedShockCells: m,
+            fineStartLevels: this.fineStartLevels - 1, fineStartRatio: r
+        });
+        child.initialize(pieces);
+        // This grid's variables in the fine grid's layout (-1: a material it does not hold)
+        const cn = child.nvar, Mc = pieces.length;
+        const childVar = [0, 1, 2];
+        for (let part = 0; part < (this.tabulated ? 2 : 1); part++) {
+            for (let j = 0; j < M; j++) childVar.push(source.indexOf(j) < 0 ? -1 : 3 + part * Mc + source.indexOf(j));
+        }
+        // One of this grid's variables in one of its cells, from the fine
+        // cells there, weighted by cross-section
+        const mean = (cell, v, from) => {
+            if (childVar[v] < 0) return 0;
+            let sum = 0, weight = 0;
+            for (let j = 0; j < r; j++) {
+                const f = (cell - c0) * r + j;
+                sum += (from || child.U)[f * cn + childVar[v]] * child.areaCell[f];
+                weight += child.areaCell[f];
+            }
+            return sum / weight;
+        };
+        const step = () => {
+            if (child.t > timeLimit) return false;
+            child.integrator.step(child);
+            return child.dt > 0 && isFinite(child.dt);
+        };
+
+        const pre = shock.pre;
+        const arrived = pre.rho + 0.02 * (shock.post.rho - pre.rho);
+        let deviation = null;
+        for (let attempt = 0; !deviation; attempt++) {
+            // Run until the shock comes within two cells of the face, then read
+            // the pressure behind it; the rest of the post-shock state follows
+            // from the jump conditions
+            while (mean(cellOf(m - 2), 0) < arrived) if (!step()) return false;
+            child.refreshOutput();
+            let p2 = 0;
+            for (let j = 0; j < r; j++) p2 += child.p[(cellOf(m - 4) - c0) * r + j] / r;
+            const post = this.shockedState(mat, pre, p2);
+            if (!post) return false;
+            const formed = this.formedShockProfile(
+                { material: shock.material, pre: pre, post: post, v: post.speed }, this.cfl * dx / start.maxSpeed, m);
+            if (!formed) return false;
+
+            // What the settled profile adds to a sharp shock holding the same
+            // mass: `shift` cells ahead of the face, in the cells used
+            const profile = formed.cells, jump = formed.post[0] - formed.pre[0];
+            let excess = 0;
+            for (let k = m - mb; k < 2 * m; k++) excess += profile[k][0] - (k < m ? formed.post[0] : formed.pre[0]);
+            const shift = excess / jump;
+            if (!(Math.abs(shift) < 0.9)) return false;
+            const change = (k, v) => {
+                const behind = k < m - 1 ? 1 : k === m - 1 ? 1 + Math.min(shift, 0) : k === m ? Math.max(shift, 0) : 0;
+                return profile[k][v] - (behind * formed.post[v] + (1 - behind) * formed.pre[v]);
+            };
+
+            // Continue until the fine grid's shock is at that position: the two
+            // cells beside the face then hold the sharp shock's mass
+            const target = (1 + shift) * formed.post[0] + (1 - shift) * formed.pre[0];
+            const inflowCell = dir > 0 ? (cellOf(m - 1) - c0) * r - 1 : (cellOf(m - 1) - c0 + 1) * r;
+            const far = child.finalTime;
+            for (let tries = 0; ; tries++) {
+                const missing = (target - mean(cellOf(m - 1), 0) - mean(cellOf(m), 0)) * dx;
+                // (within a thousandth of a cell if the last step overshot)
+                if (missing <= 1e-7 * target * dx && missing > -1e-3 * jump * dx) break;
+                // Mass arrives at the rate behind the shock, once the shock is inside these cells
+                const inflow = Math.max(dir * child.U[inflowCell * cn + 1], formed.post[1]);
+                if (missing < 0 || tries > 1000) return false;
+                child.finalTime = child.t + missing / inflow;   // the step is cut short if the mass would overshoot
+                const ok = step();
+                child.finalTime = far;
+                if (!ok) return false;
+            }
+
+            // The profile's cells must be clear of the contact; if they are
+            // not, hand over two cells further on
+            let clear = true;
+            for (let k = m - mb; k < 2 * m; k++) {
+                if (mean(cellOf(k), 3 + shock.material) < 0.99) clear = false;
+            }
+            if (clear) {
+                deviation = change;
+                break;
+            }
+            face += 2 * dir;
+            if (attempt >= 2 || !room(face) || !uniform(face, mb)) return false;
+        }
+        const t0 = child.t;
+        // The ends of a partial grid must be undisturbed
+        const still = (cell) => Math.abs(child.U[cell * cn + 1]) <= 1e-7 * child.U[cell * cn] * start.maxSpeed;
+        if ((c0 > 0 && !still(1)) || (c1 < nx && !still(child.nx - 2))) return false;
+
+        // Adopt the fine state: cell averages, interface positions and earlier snapshots
+        // (Conserved variables take the fine grid's change since t = 0, so
+        // that their totals on this grid stay exactly what they were.)
+        for (let i = c0; i < c1; i++) {
+            for (let v = 0; v < nvar; v++) {
+                if (v >= 3 && v < 3 + M) this.U[i * nvar + v] = mean(i, v);
+                else this.U[i * nvar + v] += mean(i, v) - mean(i, v, child.initialState);
+            }
+            let pc = 0;
+            for (let j = 0; j < r; j++) pc += child.pc[(i - c0) * r + j] / r;
+            this.pc[i] = pc;
+        }
+        for (let k = m - mb; k < 2 * m; k++) {
+            const idx = cellOf(k) * nvar;
+            this.U[idx] += deviation(k, 0);
+            this.U[idx + 1] += dir * deviation(k, 1);
+            this.U[idx + 2] += deviation(k, 2);
+            if (this.tabulated) this.U[idx + 3 + M + shock.material] += deviation(k, 0);
+        }
+        child.tracers.forEach((tracer, j) => {
+            const mine = this.tracers[source[j + 1] - 1];
+            mine.x = tracer.x + xa;
+            mine.trajectory = tracer.trajectory.map(point => ({ t: point.t, x: point.x + xa, v: point.v }));
+        });
+        const first = this.xtData[0];
+        for (const snap of child.xtData) {
+            if (!(snap.t > 0) || snap.t >= t0 - 1e-12) continue;
+            const copy = Object.assign({}, first, { t: snap.t, gasId: first.gasId.slice() });
+            for (const key of ['rho', 'u', 'p', 'T', 'gamma', 'pinf', 'mw']) {
+                copy[key] = new Float64Array(first[key]);
+                for (let i = c0; i < c1; i++) {
+                    let sum = 0;
+                    for (let j = 0; j < r; j++) sum += snap[key][(i - c0) * r + j];
+                    copy[key][i] = sum / r;
+                }
+            }
+            copy.materialFractions = new Float64Array(first.materialFractions);
+            for (let i = c0; i < c1; i++) {
+                copy.gasId[i] = snap.gasId[(i - c0) * r + (r >> 1)];
+                for (let j = 0; j < M; j++) {
+                    const from = source.indexOf(j);
+                    let sum = 0;
+                    for (let q = 0; from >= 0 && q < r; q++) sum += snap.materialFractions[((i - c0) * r + q) * Mc + from];
+                    copy.materialFractions[i * M + j] = sum / r;
+                }
+            }
+            this.xtData.push(copy);
+        }
+        this.t = t0;
+        this.startTime = t0;
+        this.nextXTStore = this.xtInterval * Math.ceil(t0 / this.xtInterval - 1e-9);
+        this.updateGasProperties();
+        return true;
+    }
+
+    /**
+     * State behind a shock of given post-shock pressure running into gas at
+     * rest (Rankine-Hugoniot), for a stiffened or a tabulated material.
+     * @returns {{p, T, rho, u, a, speed}|null} u and speed are magnitudes
+     */
+    shockedState(mat, pre, p2) {
+        const p1 = pre.p, v1 = 1 / pre.rho, pinf = mat.pinf;
+        if (!(p2 > p1)) return null;
+        let T2, rho2, a2;
+        if (mat.table) {
+            // e(T2) - e(T1) = (p1 + p2)/2 * (v1 - R*T2/p2), increasing in T2
+            const e1 = EulerSolver.tableEnergy(mat.table, pre.T);
+            const residual = (T) => EulerSolver.tableEnergy(mat.table, T) - e1 - 0.5 * (p1 + p2) * (v1 - mat.R * T / p2);
+            let lo = pre.T, hi = pre.T * p2 / p1;
+            for (let i = 0; i < 200 && hi - lo > 1e-12 * hi; i++) {
+                const mid = 0.5 * (lo + hi);
+                if (residual(mid) > 0) hi = mid; else lo = mid;
+            }
+            T2 = 0.5 * (lo + hi);
+            rho2 = p2 / (mat.R * T2);
+            a2 = Math.sqrt((1 + mat.R / EulerSolver.tableCv(mat.table, T2)) * mat.R * T2);
+        } else {
+            const g = mat.gamma, ratio = (p2 + pinf) / (p1 + pinf);
+            rho2 = pre.rho * ((g + 1) * ratio + (g - 1)) / ((g - 1) * ratio + (g + 1));
+            T2 = (p2 + pinf) / (rho2 * mat.R);
+            a2 = Math.sqrt(g * (p2 + pinf) / rho2);
+        }
+        if (!(rho2 > pre.rho)) return null;
+        const flux = Math.sqrt((p2 - p1) / (v1 - 1 / rho2));   // mass flux through the shock
+        const speed = flux * v1;
+        return { p: p2, T: T2, rho: rho2, u: speed * (1 - pre.rho / rho2), a: a2, speed: speed };
     }
 
     /**
@@ -463,11 +780,9 @@ class EulerSolver {
      * run the shock alone, from a sharp jump on a cell face, until it has
      * crossed a whole number of cells and its start-up pulse has left, then
      * return the conserved variables of the m cells on either side of it.
-     * @returns {{cells: Array<[number, number, number]>, shift: number}|null}
-     *   cells: [rho, rho*u, E] for 2m cells, shock running in +x; shift: how
-     *   far ahead of the window's central face (in cells) a sharp shock
-     *   holding the same mass would sit. null if the side calculation is not
-     *   clean.
+     * @returns {{cells: Array, post: Array, pre: Array}|null} [rho, rho*u, E]
+     *   for 2m cells, shock running in +x, and for the uniform states behind
+     *   and ahead; null if the side calculation is not clean.
      */
     formedShockProfile(shock, dt, m) {
         const mat = this.materialProperties[shock.material];
@@ -480,7 +795,7 @@ class EulerSolver {
         const ahead = travel + m + 6;
         const slab = (state, cells, velocity) => ({
             gasId: mat.gasId, gamma: mat.gamma, mw: this.Ru / mat.R, pinf: mat.pinf,
-            pressure: state.p, temperature: state.T, length: cells * dx, velocity: velocity
+            pressure: state.p, temperature: state.T, length: cells * dx, velocity: velocity, thermo: mat.thermo
         });
         // Equal time steps as close as possible to the main run's, ending exactly
         // when the shock has crossed `travel` cells
@@ -492,6 +807,7 @@ class EulerSolver {
             finalTime: duration, xtInterval: 10 * duration, exactStart: false
         });
         aux.initialize([slab(shock.post, behind, uPost), slab(shock.pre, ahead, 0)]);
+        const initial = new Float64Array(aux.U);
         aux.nextXTStore = Infinity;   // no snapshots, so no time-step adjustments
         aux.run();
 
@@ -502,12 +818,10 @@ class EulerSolver {
             profile.push([aux.U[c], aux.U[c + 1], aux.U[c + 2]]);
         }
         // The window must begin in settled post-shock gas and end in undisturbed gas
-        const settled = Math.abs(profile[0][0] / shock.post.rho - 1) < 0.005 && Math.abs(profile[2 * m - 1][0] / shock.pre.rho - 1) < 1e-4;
+        const settled = Math.abs(profile[0][0] / shock.post.rho - 1) < 0.02 && Math.abs(profile[2 * m - 1][0] / shock.pre.rho - 1) < 1e-4;
         if (!settled) return null;
-        // Mass in the window relative to a sharp shock on its central face
-        let excess = 0;
-        for (let k = 0; k < 2 * m; k++) excess += profile[k][0] - (k < m ? shock.post.rho : shock.pre.rho);
-        return { cells: profile, shift: excess / (shock.post.rho - shock.pre.rho) };
+        const state = (cell) => Array.from(initial.subarray(cell * aux.nvar, cell * aux.nvar + 3));
+        return { cells: profile, post: state(0), pre: state(behind + ahead - 1) };
     }
 
     /**

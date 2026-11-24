@@ -509,21 +509,115 @@ test('pre-formed shock start is mirror-symmetric', () => {
     }
 });
 
-test('the exact start is skipped where it does not apply', () => {
-    const sf6 = lib.GAS_DATABASE['8'];
+/**
+ * The same dip without reference to an exact solution: the largest pressure
+ * deficit between the expansion tail and the contact, as a fraction of the
+ * pressure of the shocked gas.
+ */
+function plateauDip(solver) {
+    const n = solver.nx;
+    let shock = n - 1;
+    while (shock > 0 && solver.p[shock] < 1.05 * solver.p[n - 1]) shock--;
+    const contact = Math.floor(solver.tracers[0].x / solver.dx);
+    const between = Array.from(solver.p.slice(Math.floor(contact + 0.25 * (shock - contact)), Math.floor(contact + 0.75 * (shock - contact)) + 1));
+    const plateau = between.sort((a, b) => a - b)[between.length >> 1];
+    let tail = contact - 3;
+    while (tail > 0 && solver.p[tail] < 1.03 * plateau) tail--;
+    let lowest = plateau;
+    for (let i = tail; i < contact - 2; i++) lowest = Math.min(lowest, solver.p[i]);
+    return 1 - lowest / plateau;
+}
+
+function weightedMass(solver) {
+    let mass = 0;
+    for (let i = 0; i < solver.nx; i++) mass += solver.U[i * solver.nvar] * solver.areaCell[i] * solver.dx;
+    return mass;
+}
+
+{
+    const sf6 = lib.GAS_DATABASE['8'], co2 = lib.GAS_DATABASE['3'];
+    // [slabs, simulated time, least dip from a plain start, greatest dip with the pre-formed shock]
     const cases = {
-        'heavy driven gas (shock stays near the contact)': [slab(HELIUM, 4485e3, 300, 3), slab(sf6, 101325, 300, 6)],
-        'temperature-dependent gases': [tslab(HELIUM, comp('4'), 4485e3, 300, 3), tslab(AIR, comp('1'), 101325, 300, 6)],
-        'area change at the diaphragm': [aslab(slab(HELIUM, 4485e3, 300, 3), 2.25), aslab(slab(AIR, 101325, 300, 6), 1)],
-        'no pressure difference': [slab(HELIUM, 101325, 300, 3), slab(AIR, 101325, 300, 6)]
+        'a heavy driven gas (the shocked gas opens up slowly)':
+            [[slab(HELIUM, 3e6, 300, 3), slab(sf6, 101325, 300, 6)], 0.0025, 0.05, 0.006],
+        'a short run':
+            [[slab(HELIUM, 3e6, 300, 3), slab(AIR, 101325, 300, 6)], 0.001, 0.01, 0.002],
+        'temperature-dependent gases':
+            [[tslab(HELIUM, comp('4'), 3e6, 300, 3), tslab(AIR, comp('1'), 101325, 300, 6)], 0.003, 0.005, 0.002],
+        'temperature-dependent gases, carbon dioxide':
+            [[tslab(HELIUM, comp('4'), 3e6, 300, 3), tslab(co2, comp('3'), 101325, 300, 6)], 0.003, 0.015, 0.003],
+        'an area change at the diaphragm':
+            [[aslab(slab(HELIUM, 3e6, 300, 3), 4), aslab(slab(AIR, 101325, 300, 6), 1)], 0.003, 0.01, 0.002],
+        'temperature-dependent gases with an area change':
+            [[aslab(tslab(HELIUM, comp('4'), 3e6, 300, 3), 3), aslab(tslab(AIR, comp('1'), 101325, 300, 6), 1)], 0.003, 0.005, 0.002]
     };
     for (const name in cases) {
-        const solver = run(cases[name], { finalTime: 0.003, nx: 500, ...hancock });
+        test(`pre-formed shock start removes the dip with ${name}`, () => {
+            const [slabs, finalTime, least, greatest] = cases[name];
+            const options = { finalTime, nx: 500, ...hancock, xtInterval: 1e-4 };
+            const plain = run(slabs, { ...options, exactStart: false });
+            const before = new lib.EulerSolver({ ...options, interfaceMethod: 'mixed', exactStart: false });
+            before.initialize(slabs);
+            const started = new lib.EulerSolver({ ...options, interfaceMethod: 'mixed' });
+            started.initialize(slabs);
+
+            // The state at the start time holds exactly the initial mass
+            assert.ok(started.startTime > 0 && started.startTime < 0.6 * finalTime, `start time ${started.startTime}`);
+            close(weightedMass(started), weightedMass(before), 1e-12, 'mass at the start time');
+            started.run();
+            close(weightedMass(started), weightedMass(before), 1e-11, 'mass at the end');
+
+            assert.ok(plateauDip(plain) > least, `plain start dip ${plateauDip(plain)}`);
+            assert.ok(plateauDip(started) < greatest, `formed start dip ${plateauDip(started)}`);
+
+            // Snapshots are evenly spaced from t = 0, interface paths continuous
+            assert.equal(started.xtData.length, plain.xtData.length);
+            started.xtData.forEach((snapshot, j) => close(snapshot.t + 1, j * 1e-4 + 1, 1e-9, `snapshot ${j} time`));
+            for (const snapshot of started.xtData) {
+                for (let i = 0; i < started.nx; i++) assert.ok(snapshot.p[i] > 0 && snapshot.rho[i] > 0 && isFinite(snapshot.T[i]));
+            }
+            const path = started.tracers[0].trajectory;
+            for (let k = 1; k < path.length; k++) assert.ok(path[k].t > path[k - 1].t && path[k].x >= path[k - 1].x - 1e-12);
+            // The shocked gas is unchanged (less exactly where a plain start leaves it barely resolved)
+            const i = Math.floor((started.tracers[0].x + 0.1) / started.dx);
+            close(started.p[i], plain.p[i], name.startsWith('a heavy') ? 0.03 : 5e-3, 'pressure behind the shock');
+        });
+    }
+}
+
+test('the fine-grid start is mirror-symmetric and handles a widening tube', () => {
+    const options = { finalTime: 0.003, nx: 500, ...hancock };
+    const right = run([aslab(slab(HELIUM, 3e6, 300, 3), 4), aslab(slab(AIR, 101325, 300, 6), 1)], options);
+    const left = run([aslab(slab(AIR, 101325, 300, 6), 1), aslab(slab(HELIUM, 3e6, 300, 3), 4)], options);
+    assert.ok(left.startTime > 0);
+    close(left.startTime, right.startTime, 1e-9, 'start time');
+    for (let i = 0; i < right.nx; i++) close(left.p[right.nx - 1 - i], right.p[i], 1e-8, `p[${i}]`);
+
+    // Driven section wider than the driver: the shock is handed over past the transition
+    const slabs = [aslab(slab(HELIUM, 3e6, 300, 3), 1), aslab(slab(AIR, 101325, 300, 6), 2)];
+    const wide = run(slabs, options);
+    const fine = run(slabs, { ...options, nx: 2000, exactStart: false, areaTransition: 0.36 });
+    assert.ok(wide.startTime > 0.36 / 2000, `start time ${wide.startTime}`);
+    // The expansion in the driver, where a plain start leaves an offset of about half a percent
+    close(mean(wide, 'p', 1.5, 2.0), mean(fine, 'p', 1.5, 2.0), 1.5e-3, 'pressure in the expansion');
+    const plain = run(slabs, { ...options, exactStart: false });
+    assert.ok(Math.abs(mean(plain, 'p', 1.5, 2.0) / mean(fine, 'p', 1.5, 2.0) - 1) > 3e-3);
+});
+
+test('the start is left as plain jumps where a pre-formed shock does not apply', () => {
+    const cases = {
+        'no pressure difference': [[slab(HELIUM, 101325, 300, 3), slab(AIR, 101325, 300, 6)], {}],
+        'too short a run': [[slab(HELIUM, 4485e3, 300, 3), slab(AIR, 101325, 300, 6)], { finalTime: 1e-4 }],
+        'first order (no settled profile within a few cells)':
+            [[tslab(HELIUM, comp('4'), 4485e3, 300, 3), tslab(AIR, comp('1'), 101325, 300, 6)], { order: 1, integrator: 'RK2' }],
+        'driven section too short for the shock to clear the contact':
+            [[aslab(slab(HELIUM, 4485e3, 300, 3), 2), aslab(slab(AIR, 101325, 300, 0.05), 1)], {}]
+    };
+    for (const name in cases) {
+        const solver = run(cases[name][0], { finalTime: 0.003, nx: 500, ...hancock, ...cases[name][1] });
         assert.equal(solver.startTime, 0, name);
         for (let i = 0; i < solver.nx; i++) assert.ok(isFinite(solver.p[i]) && solver.rho[i] > 0, name);
     }
-    // Too short a run to reach the start time
-    assert.equal(run([slab(HELIUM, 4485e3, 300, 3), slab(AIR, 101325, 300, 6)], { finalTime: 1e-4, nx: 500, ...hancock }).startTime, 0);
 });
 
 test('start-up error behind the expansion tail: small with the pre-formed shock, bounded without', () => {
