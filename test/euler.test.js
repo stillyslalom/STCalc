@@ -604,6 +604,40 @@ test('the fine-grid start is mirror-symmetric and handles a widening tube', () =
     assert.ok(Math.abs(mean(plain, 'p', 1.5, 2.0) / mean(fine, 'p', 1.5, 2.0) - 1) > 3e-3);
 });
 
+test('a left-running shock gets the same start as a right-running one', () => {
+    const sf6 = lib.GAS_DATABASE['8'];
+    const cases = {
+        'heavy driven gas, exact start': [[slab(HELIUM, 3e6, 300, 3), slab(sf6, 101325, 300, 6)], { finalTime: 0.0025 }],
+        'diaphragm inside a cell, exact start': [[slab(HELIUM, 3e6, 300, 2.777), slab(AIR, 101325, 300, 6.223)], {}],
+        'temperature-dependent gases, fine-grid start':
+            [[tslab(HELIUM, comp('4'), 3e6, 300, 2.777), tslab(AIR, comp('1'), 101325, 300, 6.223)], {}],
+        'widening tube, fine-grid start': [[aslab(slab(HELIUM, 3e6, 300, 3), 1), aslab(slab(AIR, 101325, 300, 6), 2)], {}]
+    };
+    for (const name in cases) {
+        const options = { finalTime: 0.003, nx: 500, ...hancock, xtInterval: 1e-4, ...cases[name][1] };
+        const right = run(cases[name][0], options);
+        const left = run(cases[name][0].slice().reverse(), options);
+        const n = right.nx;
+        assert.ok(left.startTime > 0, name);
+        close(left.startTime, right.startTime, 1e-9, `${name}: start time`);
+        assert.equal(left.xtData.length, right.xtData.length, name);
+        close(n * left.dx - left.tracers[0].x, right.tracers[0].x, 1e-9, `${name}: contact position`);
+        for (let i = 0; i < n; i++) {
+            close(left.p[n - 1 - i], right.p[i], 1e-6, `${name}: p[${i}]`);
+            close(left.rho[n - 1 - i], right.rho[i], 1e-6, `${name}: rho[${i}]`);
+            assert.ok(Math.abs(left.u[n - 1 - i] + right.u[i]) < 1e-3, `${name}: u[${i}]`);
+        }
+        // An early snapshot, taken before the start time, mirrors too
+        const early = 2;
+        assert.ok(left.xtData[early].t < left.startTime, name);
+        for (let i = 0; i < n; i++) close(left.xtData[early].p[n - 1 - i], right.xtData[early].p[i], 1e-6, `${name}: early p[${i}]`);
+        if (!name.startsWith('widening')) {
+            assert.ok(plateauDip({ nx: n, dx: left.dx, p: Float64Array.from(left.p).reverse(), tracers: [{ x: n * left.dx - left.tracers[0].x }] })
+                < (name.startsWith('heavy') ? 0.006 : 0.002), `${name}: dip`);
+        }
+    }
+});
+
 test('the start is left as plain jumps where a pre-formed shock does not apply', () => {
     const cases = {
         'no pressure difference': [[slab(HELIUM, 101325, 300, 3), slab(AIR, 101325, 300, 6)], {}],
