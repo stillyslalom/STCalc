@@ -12,6 +12,7 @@ const SHOCK_ATM = 101325;       // Pa
 const SHOCK_PSI_PER_ATM = 14.696;
 const SHOCK_RU = 8314.51;       // J/(kmol K)
 const HIGH_TEMPERATURE_WARNING_K = 1000;
+const EXTREME_DRIVER_PRESSURE_PA = 2e8;
 
 class ShockInputError extends Error {
     constructor(field, message) {
@@ -132,6 +133,13 @@ function computeShockTube(input) {
     } else {
         d4 = (p4 + pinf4) / (r4 * t4);
         p4psig = (p4 - SHOCK_ATM) / SHOCK_ATM * SHOCK_PSI_PER_ATM / areaFactor;
+        if (p4 > EXTREME_DRIVER_PRESSURE_PA && pinf4 === 0) {
+            warnings.push({
+                code: 'extreme-driver-pressure',
+                message: 'The required driver pressure (' + (p4 / 1e6).toPrecision(3) + ' MPa) is far beyond practical shock tube drivers and the ideal-gas law. This driver gas tops out near Mach ' +
+                    maxMachForDriver(input.driven, input.driver, t1, t4).toFixed(2) + '; use a lighter or hotter driver gas.'
+            });
+        }
     }
 
     const hottest = Math.max(t2, t5);

@@ -74,6 +74,12 @@ test('unreachable Mach number warns instead of failing', () => {
     assert.equal(lib.computeShockTube({ ...base, mach: mMax - 0.01 }).reachable, true);
 });
 
+test('absurd driver pressures are flagged', () => {
+    const r = lib.computeShockTube({ ...base, mach: 5 });
+    assert.equal(r.reachable, true);
+    assert.ok(r.warnings.some(w => w.code === 'extreme-driver-pressure'));
+});
+
 test('high temperatures raise a constant-gamma warning', () => {
     const r = lib.computeShockTube({ ...base, mach: 4, driver: HELIUM });
     assert.ok(r.warnings.some(w => w.code === 'high-temperature'));

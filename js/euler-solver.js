@@ -534,55 +534,45 @@ class EulerSolver {
     }
     
     /**
-     * Run simulation to completion
+     * Advance the simulation for at most budgetMs of wall time.
+     * @returns {boolean} true once the final time has been reached
      */
-    run(progressCallback) {
-        const startTime = Date.now();
-        let lastProgressUpdate = startTime;
-
+    advance(budgetMs) {
+        const deadline = Date.now() + budgetMs;
+        const begin = Date.now();
         try {
+            let sinceClock = 0;
             while (this.t < this.finalTime) {
-                // Delegate time stepping to the integrator
                 this.integrator.step(this);
 
-                // Safety check for NaN or infinite values
                 if (!isFinite(this.dt) || this.dt <= 0) {
-                    throw new Error(`Invalid time step detected: dt = ${this.dt} at t = ${this.t}s`);
+                    throw new Error(`Invalid time step detected: dt = ${this.dt}`);
                 }
-
-                // Update progress every 100ms
-                const now = Date.now();
-                if (progressCallback && now - lastProgressUpdate > 100) {
-                    progressCallback(this.t / this.finalTime);
-                    lastProgressUpdate = now;
-                }
-
-                // Safety check to prevent infinite loops
                 if (this.timeSteps > 1000000) {
-                    throw new Error('Simulation exceeded maximum time steps (1,000,000). Check CFL condition and grid resolution.');
+                    throw new Error('Exceeded 1,000,000 time steps. Reduce the simulated time or the grid resolution.');
+                }
+                // Reading the clock every step would dominate small runs
+                if (++sinceClock >= 20) {
+                    sinceClock = 0;
+                    if (Date.now() >= deadline) break;
                 }
             }
-
-            // Final progress update
-            if (progressCallback) {
-                progressCallback(1.0);
-            }
-
-            const endTime = Date.now();
-            console.log(`Simulation completed in ${(endTime - startTime) / 1000} seconds`);
-            console.log(`Time steps: ${this.timeSteps}`);
-            console.log(`Final time: ${this.t} s`);
-            console.log(`X-T snapshots: ${this.xtData.length}`);
-
-            // Store wall time for performance tracking
-            this.wallTime = (endTime - startTime) / 1000;
-
         } catch (error) {
-            const endTime = Date.now();
-            this.wallTime = (endTime - startTime) / 1000;
-            console.error('Simulation error:', error);
-            throw new Error(`Euler solver failed at t=${this.t.toFixed(6)}s after ${this.timeSteps} steps: ${error.message}`);
+            throw new Error(`Euler solver failed at t = ${(this.t * 1000).toFixed(4)} ms after ${this.timeSteps} steps: ${error.message}`);
+        } finally {
+            this.wallTime = (this.wallTime || 0) + (Date.now() - begin) / 1000;
         }
+        return this.t >= this.finalTime;
+    }
+
+    /**
+     * Run simulation to completion (blocking)
+     */
+    run(progressCallback) {
+        while (!this.advance(100)) {
+            if (progressCallback) progressCallback(this.t / this.finalTime);
+        }
+        if (progressCallback) progressCallback(1.0);
     }
 }
 
