@@ -70,7 +70,7 @@ function solveExactRiemann(leftState, rightState, ru = 8314.51) {
             break;
         }
         let next = pStar - f / slope(pStar);
-        // Keep the iterate admissible; halve towards the floor if Newton overshoots
+        // Keep the iterate admissible; halve toward the floor if Newton overshoots
         if (!(next > pMin)) next = 0.5 * (pStar + pMin);
         if (Math.abs(next - pStar) <= 1e-14 * scale) {
             pStar = next;

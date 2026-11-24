@@ -75,7 +75,7 @@ class XTVisualization {
 
     /** Fit the canvas to its container; all drawing uses CSS-pixel coordinates. */
     layout() {
-        const fit = fitCanvas(this.canvas, 1000, 0.6, 300);
+        const fit = fitCanvas(this.canvas, 900, 0.5, 280);
         this.ctx = fit.ctx;
         this.width = fit.width;
         this.height = fit.height;
@@ -142,7 +142,7 @@ class XTVisualization {
         this.probes = positions || [];
     }
 
-    /** Logarithmic colour needs strictly positive data. */
+    /** Logarithmic color needs strictly positive data. */
     logScaleActive() {
         return this.useLogScale && this.vMin > 0 && this.vMax > this.vMin;
     }
@@ -305,7 +305,7 @@ class XTVisualization {
         ctx.fillText('Time (ms)', 0, 0);
         ctx.restore();
 
-        // The colour scale is labelled above the colour bar
+        // The color scale is labelled above the color bar
         ctx.font = 'bold 13px Arial';
         ctx.textAlign = 'right';
         ctx.fillText(field.label + ' (' + field.unit + ')', this.width - 6, this.margin.top - 12);

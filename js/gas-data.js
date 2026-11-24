@@ -45,7 +45,7 @@ const GAS_DATABASE = {
     }
 };
 
-/** Normalise a gas record so that pinf is always a finite number. */
+/** Normalize a gas record so that pinf is always a finite number. */
 function normalizeGas(gas) {
     return {
         name: gas.name,

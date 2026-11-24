@@ -19,7 +19,7 @@ function run(slabs, options) {
     return solver;
 }
 
-/** Mean of a field over cells whose centre lies in [x0, x1]. */
+/** Mean of a field over cells whose center lies in [x0, x1]. */
 function mean(solver, field, x0, x1) {
     let sum = 0, n = 0;
     for (let i = 0; i < solver.nx; i++) {

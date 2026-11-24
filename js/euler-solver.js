@@ -409,7 +409,7 @@ class EulerSolver {
     /**
      * Forward-Euler update Uout = U - dt * dF/dx using the stored fluxes.
      * Volume fractions obey the advection equation d(alpha)/dt + u d(alpha)/dx = 0,
-     * discretised as div(alpha*u) - alpha*div(u) with the same face velocities
+     * discretized as div(alpha*u) - alpha*div(u) with the same face velocities
      * as the HLLC flux so that material interfaces stay free of pressure
      * oscillations.
      */
@@ -442,7 +442,7 @@ class EulerSolver {
      */
     updateGasProperties() {
         if (this.interfaceMethod === 'mixed') {
-            // Remove round-off drift: clamp to [0, 1] and renormalise
+            // Remove round-off drift: clamp to [0, 1] and renormalize
             const nvar = this.nvar;
             const M = this.numMaterials;
             for (let i = 0; i < this.nx; i++) {

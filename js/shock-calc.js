@@ -1,6 +1,6 @@
 /**
  * Zero-dimensional shock tube relations (incident shock, reflected shock,
- * driver pressure), generalised to the stiffened-gas equation of state.
+ * driver pressure), generalized to the stiffened-gas equation of state.
  *
  * For a stiffened gas every ideal-gas jump relation holds with the pressure p
  * replaced by p + pinf, so the same expressions cover gases and liquids.

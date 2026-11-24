@@ -86,7 +86,7 @@ function calculateInterface() {
 }
 
 function plotRMIGrowth(growth) {
-    const fit = fitCanvas(byId('rmiGrowthCanvas'), 800, 0.5, 240);
+    const fit = fitCanvas(byId('rmiGrowthCanvas'), 620, 0.45, 220);
     const ctx = fit.ctx, width = fit.width, height = fit.height;
     const margin = { left: 58, right: 16, top: 16, bottom: 46 };
     const plotWidth = width - margin.left - margin.right;

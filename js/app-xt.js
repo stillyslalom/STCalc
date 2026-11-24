@@ -62,19 +62,19 @@ function renderXTSlabs() {
         const numberField = function (label, value, onInput) {
             const input = el('input', { type: 'number', step: 'any', min: '0', inputMode: 'decimal', value: value });
             input.addEventListener('input', function () { onInput(input.value === '' ? NaN : Number(input.value)); });
-            return el('label', { class: 'slab-field' }, label, input);
+            return el('label', { class: 'slab-field' }, el('span', {}, label), input);
         };
 
         const node = el('div', { class: 'slab-item' },
             el('div', { class: 'slab-number' }, '#' + n),
             el('div', { class: 'slab-controls' },
-                el('label', { class: 'slab-field' }, 'Material', select),
+                el('label', { class: 'slab-field' }, el('span', {}, 'Material'), select),
                 numberField('Pressure (kPa)', Number((slab.pressure / 1000).toPrecision(7)), function (v) { slab.pressure = v * 1000; }),
                 numberField('Temperature (K)', slab.temperature, function (v) { slab.temperature = v; }),
                 numberField('Length (m)', slab.length, function (v) { slab.length = v; })),
             el('div', { class: 'slab-actions' },
-                el('button', { type: 'button', class: 'secondary small', disabled: index === 0, 'aria-label': 'Move slab ' + n + ' towards the driver end', onclick: function () { move(index, -1); } }, '↑'),
-                el('button', { type: 'button', class: 'secondary small', disabled: index === xtSlabs.length - 1, 'aria-label': 'Move slab ' + n + ' towards the driven end', onclick: function () { move(index, 1); } }, '↓'),
+                el('button', { type: 'button', class: 'secondary small', disabled: index === 0, 'aria-label': 'Move slab ' + n + ' toward the driver end', onclick: function () { move(index, -1); } }, '↑'),
+                el('button', { type: 'button', class: 'secondary small', disabled: index === xtSlabs.length - 1, 'aria-label': 'Move slab ' + n + ' toward the driven end', onclick: function () { move(index, 1); } }, '↓'),
                 el('button', {
                     type: 'button', class: 'danger small',
                     onclick: function () {
@@ -199,7 +199,7 @@ function runXTSimulation() {
 
     const finish = function () {
         runBtn.disabled = false;
-        runBtn.textContent = 'Run simulation';
+        runBtn.textContent = 'Run';
         progress.hidden = true;
     };
     const fail = function (error) {
@@ -294,7 +294,7 @@ function renderXTProbes() {
 
     const fieldKey = byId('xtField').value;
     const field = XT_FIELDS[fieldKey];
-    const fit = fitCanvas(byId('xtProbeCanvas'), 1000, 0.36, 240);
+    const fit = fitCanvas(byId('xtProbeCanvas'), 900, 0.28, 200);
     const ctx = fit.ctx, width = fit.width, height = fit.height;
     const narrow = width < 560;
     // The legend sits beside the plot when there is room, otherwise above it
@@ -440,7 +440,7 @@ function exportXTProbeCSV() {
 }
 
 function exportXTJSON() {
-    // Typed arrays would serialise as objects keyed by index
+    // Typed arrays would serialize as objects keyed by index
     const plain = function (key, value) { return ArrayBuffer.isView(value) ? Array.from(value) : value; };
     const data = { configuration: xtRunConfig, results: xtResults };
     downloadBlob(JSON.stringify(data, plain), 'application/json', 'xtcalc_' + getTimestampString() + '.json');
@@ -460,7 +460,7 @@ const XT_EXPORTS = {
 /* ------------------------------------------------------------------ */
 
 document.addEventListener('DOMContentLoaded', function () {
-    const initialise = function () {
+    const initialize = function () {
         if (xtSlabs.length > 0) return;
         // Start from the shock tube calculation when there is one
         if (!(appState.shock && appState.shock.reachable && importShockIntoXT())) {
@@ -470,9 +470,9 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     };
     byId('xt').addEventListener('toggle', function () {
-        if (byId('xt').open) initialise();
+        if (byId('xt').open) initialize();
     });
-    if (byId('xt').open) initialise();
+    if (byId('xt').open) initialize();
 
     byId('xtImportBtn').addEventListener('click', function () {
         if (importShockIntoXT()) showXTMessage('');

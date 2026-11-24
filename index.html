@@ -27,6 +27,8 @@
 <section class="tool" id="shock">
 <h2>Shock tube</h2>
 
+<div class="split">
+<div>
 <form id="shockForm" novalidate>
   <fieldset class="choice">
     <legend>Solve for</legend>
@@ -98,7 +100,9 @@
   <div class="messages" id="gasMessages" role="status" aria-live="polite"></div>
   <div id="gasList"></div>
 </details>
+</div>
 
+<div>
 <div class="messages" id="shockMessages" role="status" aria-live="polite"></div>
 
 <div id="shockOutput" aria-label="Shock tube results">
@@ -132,12 +136,16 @@
 </div>
 </div>
 </div>
+</div>
+</div>
 </section>
 
 <!-- ============================ Interface / RMI ============================ -->
 <details class="tool" id="interface">
 <summary>Shocked interface (RMI)</summary>
 
+<div class="split">
+<div>
 <form id="interfaceForm" novalidate>
   <div class="fields">
     <label for="interfaceHeavyGas" title="The material beyond the interface: the heavy gas in a light-to-heavy experiment">Downstream gas</label>
@@ -165,6 +173,7 @@
 </form>
 
 <div class="messages" id="interfaceMessages" role="status" aria-live="polite"></div>
+</div>
 
 <div id="interfaceResults" hidden>
   <h3>Results</h3>
@@ -187,7 +196,6 @@
     </tbody>
   </table>
 
-  <h3>RMI growth</h3>
   <dl class="stats panel">
     <div><dt>Wavenumber k</dt><dd><span id="rmiWavenumber"></span> rad/m</dd></div>
     <div><dt>ka₀</dt><dd id="rmiKa0"></dd></div>
@@ -203,63 +211,38 @@
     <span><i style="background:#1e7e34"></i>Nonlinear</span>
   </p>
 </div>
+</div>
 </details>
 
 <!-- ============================ X-T diagram ============================ -->
 <details class="tool" id="xt">
 <summary>x-t diagram</summary>
 
-<h3 title="Listed from the driver end wall to the driven end wall">Initial slabs</h3>
+<div id="xtSlabList" title="Listed from the driver end wall to the driven end wall"></div>
 <div class="button-row">
-  <button type="button" class="secondary" id="xtImportBtn" title="Set slabs 1 and 2 to the driver and driven states of the shock tube calculation">Import from shock tube</button>
-</div>
-<div id="xtSlabList"></div>
-<button type="button" class="secondary" id="xtAddSlabBtn">Add slab</button>
-
-<h3>Settings</h3>
-<div class="fields">
-  <label for="xtSimTime">Simulated time</label>
-  <input type="number" id="xtSimTime" value="20" min="0" step="any" inputmode="decimal">
-  <span class="unit">ms</span>
-
-  <label for="xtGridPoints" title="50 to 5000. Run time grows with the square of this.">Grid cells</label>
-  <input type="number" id="xtGridPoints" value="500" min="50" max="5000" step="50" inputmode="numeric">
-  <span class="unit"></span>
-
-  <label for="xtSnapshotInterval" title="Time between stored frames; also the probe sampling interval">Snapshot interval</label>
-  <input type="number" id="xtSnapshotInterval" value="0.1" min="0" step="any" inputmode="decimal">
-  <span class="unit">ms</span>
-
-  <label for="xtProbes" title="Optional. Distances from the driver end wall, comma separated.">Probe positions</label>
-  <input type="text" id="xtProbes" value="" placeholder="e.g. 4.5, 8.9" inputmode="decimal">
-  <span class="unit">m</span>
+  <button type="button" class="secondary small" id="xtAddSlabBtn">Add slab</button>
+  <button type="button" class="secondary small" id="xtImportBtn" title="Set slabs 1 and 2 to the driver and driven states of the shock tube calculation">Import from shock tube</button>
 </div>
 
-<details class="panel">
-  <summary>Numerical options</summary>
-  <div class="fields">
-    <label for="xtIntegrator">Time integrator</label>
+<div class="inline-form" id="xtSettings">
+  <label>Time (ms) <input type="number" id="xtSimTime" value="20" min="0" step="any" inputmode="decimal"></label>
+  <label title="50 to 5000. Run time grows with the square of this.">Grid cells <input type="number" id="xtGridPoints" value="500" min="50" max="5000" step="50" inputmode="numeric"></label>
+  <label title="Time between stored frames; also the probe sampling interval">Snapshot interval (ms) <input type="number" id="xtSnapshotInterval" value="0.1" min="0" step="any" inputmode="decimal"></label>
+  <label title="Optional. Distances from the driver end wall, comma separated.">Probes (m) <input type="text" id="xtProbes" value="" placeholder="e.g. 4.5, 8.9" inputmode="decimal"></label>
+  <label>Integrator
     <select id="xtIntegrator">
       <option value="SSP" selected>SSP-RK3</option>
       <option value="RK2">RK2</option>
     </select>
-    <span class="unit"></span>
-
-    <label for="xtCflNumber" title="0.8 suits SSP; use 0.4 with RK2">CFL number</label>
-    <input type="number" id="xtCflNumber" value="0.8" min="0.05" max="0.9" step="0.05" inputmode="decimal">
-    <span class="unit"></span>
-
-    <label for="xtInterfaceMethod" id="xtInterfaceMethodLabel">Interface treatment</label>
+  </label>
+  <label title="0.8 suits SSP; use 0.4 with RK2">CFL <input type="number" id="xtCflNumber" value="0.8" min="0.05" max="0.9" step="0.05" inputmode="decimal"></label>
+  <label id="xtInterfaceMethodLabel">Interfaces
     <select id="xtInterfaceMethod">
       <option value="mixed" selected>Mixed cell</option>
       <option value="sharp">Sharp</option>
     </select>
-    <span class="unit"></span>
-  </div>
-</details>
-
-<div class="button-row">
-  <button type="button" id="xtRunBtn">Run simulation</button>
+  </label>
+  <button type="button" id="xtRunBtn">Run</button>
   <button type="button" class="secondary" id="xtClearBtn">Clear</button>
 </div>
 
@@ -281,7 +264,6 @@
   <canvas id="xtCanvas" class="plot" role="img" aria-label="x-t diagram: white lines are material interfaces, dashed lines are probes" title="White lines: material interfaces. Dashed lines: probes."></canvas>
 
   <div id="xtProbeContainer" hidden>
-    <h3>Probe traces</h3>
     <canvas id="xtProbeCanvas" class="plot" role="img" aria-label="Field history at each probe"></canvas>
   </div>
 
@@ -299,6 +281,7 @@
 </details>
 
 <!-- ============================ Timing ============================ -->
+<div class="pair">
 <section class="tool" id="timing">
 <h2>Timing</h2>
 
@@ -310,7 +293,7 @@
     <label for="twave" title="Time for the shock to pass between the two transducers">Shock transit time</label>
     <input id="twave" type="number" step="any" min="0" inputmode="decimal"><span class="unit">ms</span>
 
-    <label for="xtrig" title="Distance from the trigger transducer to the window centreline">Trigger to window</label>
+    <label for="xtrig" title="Distance from the trigger transducer to the window centerline">Trigger to window</label>
     <input id="xtrig" type="number" step="any" min="0" value="0.859" inputmode="decimal"><span class="unit">m</span>
 
     <label for="xint" title="Distance from the trigger transducer to the interface">Trigger to interface</label>
@@ -363,6 +346,7 @@
   <label for="pboosttank" title="Isothermal ideal-gas estimate; independent of the gas">Boost tank pressure</label><output id="pboosttank"></output><span class="unit">psig</span>
 </div>
 </section>
+</div>
 
 </div>
 
