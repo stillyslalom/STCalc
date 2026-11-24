@@ -23,7 +23,8 @@ let drivenPicker, driverPicker;
 const SHOCK_OUTPUT_IDS = [
     'pdriv', 'pshocked', 'pfour', 'preflect', 'tdriv', 'tshocked', 'tfour', 'treflect',
     'ddriv', 'dshocked', 'dfour', 'dreflect', 'adriv', 'ashocked', 'afour', 'areflect',
-    'ushocked', 'outmach', 'wshocked', 'wreflect', 'mreflect', 'pfourpsig', 'outgamma', 'outmw'
+    'gdriv', 'gshocked', 'gfour', 'greflect',
+    'ushocked', 'outmach', 'wshocked', 'wreflect', 'mreflect', 'pfourpsig', 'outmw'
 ];
 
 function shockMode() {
@@ -49,6 +50,35 @@ function clearShockOutputs() {
     setShockResult(null);
 }
 
+/** Write a result to the output fields in the current display units. */
+function displayShockResult(result) {
+    const s1 = result.state1, s2 = result.state2, s4 = result.state4, s5 = result.state5;
+    const set = function (id, text) { byId(id).value = text; };
+    const column = function (suffix, s) {
+        set('p' + suffix, formatQuantity('pressure', s.p));
+        set('t' + suffix, formatQuantity('temperature', s.T));
+        set('d' + suffix, formatSig(s.rho));
+        set('a' + suffix, formatSig(s.a));
+        set('g' + suffix, formatSig(s.gamma, 5));
+    };
+    column('driv', s1);
+    column('shocked', s2);
+    column('four', s4);
+    column('reflect', s5);
+    set('ushocked', formatSig(s2.u));
+    set('outmach', formatSig(result.mach));
+    set('wshocked', formatSig(result.shockSpeed));
+    set('wreflect', formatSig(result.reflectedShockSpeed));
+    set('mreflect', formatSig(result.reflectedMach));
+    // The legacy estimate is stored in psi gauge
+    set('pfourpsig', result.driverPressurePsig === null ? '—'
+        : formatQuantity('gauge', result.driverPressurePsig / PSI_PER_PA));
+    set('outmw', formatSig(result.mw));
+    byId('outmwLabel').title = result.pinf > 0
+        ? 'Effective value for the stiffened gas; p∞ = ' + formatSig(result.pinf / 1e6, 4) + ' MPa'
+        : '';
+}
+
 function calcShock() {
     const form = byId('shockForm');
     const messages = byId('shockMessages');
@@ -59,15 +89,17 @@ function calcShock() {
         inputs = {
             driven: drivenPicker.resolve(),
             driver: driverPicker.resolve(),
-            p1: readNumber(byId('pinit'), 'Driven pressure', { positive: true }),
-            t1: readNumber(byId('tinit'), 'Driven temperature', { positive: true }),
-            t4: readNumber(byId('tid'), 'Driver temperature', { positive: true }),
-            areaFactor: readNumber(byId('areafact'), 'Area contraction factor', { positive: true })
+            p1: readQuantity(byId('pinit'), 'Driven pressure'),
+            t1: readQuantity(byId('tinit'), 'Driven temperature'),
+            t4: readQuantity(byId('tid'), 'Driver temperature'),
+            areaFactor: readNumber(byId('areafact'), 'Area contraction factor', { positive: true }),
+            variableGamma: byId('gasModel').value === 'nasa',
+            formatTemperature: function (T) { return formatQuantity('temperature', T, 4) + ' ' + Units.label('temperature'); }
         };
 
         let mach;
         if (shockMode() === 'pressure') {
-            const p4 = readNumber(byId('p4input'), 'Driver pressure', { positive: true });
+            const p4 = readQuantity(byId('p4input'), 'Driver pressure');
             if (p4 <= inputs.p1) throw new FieldError(byId('p4input'), 'Driver pressure must exceed the driven pressure to produce a shock.');
             mach = machFromDriverPressure({ ...inputs, p4: p4 });
         } else {
@@ -82,26 +114,7 @@ function calcShock() {
         return;
     }
 
-    const s1 = result.state1, s2 = result.state2, s4 = result.state4, s5 = result.state5;
-    const mpa = function (p) { return p === null ? '—' : formatSig(p / 1e6); };
-    const set = function (id, text) { byId(id).value = text; };
-
-    set('pdriv', mpa(s1.p)); set('pshocked', mpa(s2.p)); set('pfour', mpa(s4.p)); set('preflect', mpa(s5.p));
-    set('tdriv', formatSig(s1.T)); set('tshocked', formatSig(s2.T)); set('tfour', formatSig(s4.T)); set('treflect', formatSig(s5.T));
-    set('ddriv', formatSig(s1.rho)); set('dshocked', formatSig(s2.rho)); set('dfour', formatSig(s4.rho)); set('dreflect', formatSig(s5.rho));
-    set('adriv', formatSig(s1.a)); set('ashocked', formatSig(s2.a)); set('afour', formatSig(s4.a)); set('areflect', formatSig(s5.a));
-    set('ushocked', formatSig(s2.u));
-    set('outmach', formatSig(result.mach));
-    set('wshocked', formatSig(result.shockSpeed));
-    set('wreflect', formatSig(result.reflectedShockSpeed));
-    set('mreflect', formatSig(result.reflectedMach));
-    set('pfourpsig', formatSig(result.driverPressurePsig));
-    set('outgamma', formatSig(result.gamma));
-    set('outmw', formatSig(result.mw));
-    byId('outmwLabel').title = result.pinf > 0
-        ? 'Effective value for the stiffened gas; p∞ = ' + formatSig(result.pinf / 1e6, 4) + ' MPa'
-        : '';
-
+    displayShockResult(result);
     showMessages(messages, result.warnings.map(function (w) { return { type: 'warning', text: w.message }; }));
     byId('shockOutput').classList.remove('stale');
     setShockResult(result, inputs);
@@ -112,18 +125,31 @@ function calcShock() {
 /* Persistence: browser storage and shareable links                    */
 /* ------------------------------------------------------------------ */
 
+// Saved states and links hold SI values (Pa, K) whatever units are displayed
 const SHOCK_FIELDS = { m: 'mach', p4: 'p4input', p1: 'pinit', t1: 'tinit', t4: 'tid', af: 'areafact' };
 
 function readShockInputState() {
-    const state = { mode: shockMode(), driven: drivenPicker.getValue(), driver: driverPicker.getValue() };
-    for (const key in SHOCK_FIELDS) state[key] = byId(SHOCK_FIELDS[key]).value;
+    const state = {
+        mode: shockMode(), gm: byId('gasModel').value,
+        driven: drivenPicker.getValue(), driver: driverPicker.getValue()
+    };
+    for (const key in SHOCK_FIELDS) {
+        const input = byId(SHOCK_FIELDS[key]);
+        const si = input.dataset.quantity ? Units.inputSI(input) : null;
+        state[key] = si === null ? input.value.trim() : String(Number(si.toPrecision(12)));
+    }
     return state;
 }
 
 function applyShockInputState(state) {
     if (state.mode === 'pressure' || state.mode === 'mach') byId('shockForm').elements.mode.value = state.mode;
+    if (state.gm === 'nasa' || state.gm === 'constant') byId('gasModel').value = state.gm;
     for (const key in SHOCK_FIELDS) {
-        if (state[key] !== undefined && state[key] !== null) byId(SHOCK_FIELDS[key]).value = state[key];
+        if (state[key] === undefined || state[key] === null) continue;
+        const input = byId(SHOCK_FIELDS[key]);
+        const numeric = String(state[key]).trim() !== '' && isFinite(Number(state[key]));
+        if (input.dataset.quantity && numeric) Units.setInput(input, Number(state[key]));
+        else input.value = state[key];
     }
     if (state.driven) drivenPicker.setValue(state.driven);
     if (state.driver) driverPicker.setValue(state.driver);
@@ -133,6 +159,7 @@ function applyShockInputState(state) {
 function shockStateToQuery(state) {
     const params = new URLSearchParams();
     params.set('mode', state.mode);
+    if (state.gm === 'nasa') params.set('gm', 'nasa');
     for (const key in SHOCK_FIELDS) {
         const usedInMode = (key !== 'm' || state.mode === 'mach') && (key !== 'p4' || state.mode === 'pressure');
         if (usedInMode) params.set(key, state[key]);
@@ -145,7 +172,7 @@ function shockStateToQuery(state) {
 function shockStateFromQuery(query) {
     const params = new URLSearchParams(query);
     if (!params.has('dn') || !params.has('dr')) return null;
-    const state = { mode: params.get('mode') || 'mach' };
+    const state = { mode: params.get('mode') || 'mach', gm: params.get('gm') || 'constant' };
     for (const key in SHOCK_FIELDS) {
         if (params.has(key)) state[key] = params.get(key);
     }
@@ -267,6 +294,7 @@ function calcBoost() {
     try {
         const driverVolume = readNumber(byId('drivervol'), 'Driver volume', { positive: true });
         const boostVolume = readNumber(byId('boostvol'), 'Boost tank volume', { positive: true });
+        // Gauge pressures in the display unit; the relations are linear in them
         const rupture = readNumber(byId('prupture'), 'Rupture pressure', { positive: true });
         const less = readNumber(byId('percless'), 'Pre-boost margin', { min: 0, max: 100 });
         const more = readNumber(byId('percmore'), 'Post-boost margin', { min: 0 });
@@ -430,8 +458,24 @@ function onReset(formId, outputIds, messagesId) {
     });
 }
 
+function setupUnitPickers() {
+    const pickers = { pressure: byId('unitPressure'), temperature: byId('unitTemperature') };
+    for (const quantity in pickers) {
+        const select = pickers[quantity];
+        select.replaceChildren(...Object.keys(Units.table[quantity]).map(function (unit) {
+            return el('option', { value: unit }, unit);
+        }));
+        select.value = Units.current[quantity];
+        select.addEventListener('change', function () { Units.set(quantity, select.value); });
+    }
+}
+
 document.addEventListener('DOMContentLoaded', function () {
     GasLibrary.load();
+    Units.load();
+    setupUnitPickers();
+    Units.updateLabels(document);
+    Units.applyDefaults(document);
 
     const markStale = function () {
         if (appState.shock) byId('shockOutput').classList.add('stale');
@@ -450,7 +494,8 @@ document.addEventListener('DOMContentLoaded', function () {
     byId('shockForm').addEventListener('reset', function () {
         // Runs before the browser restores default values
         setTimeout(function () {
-            applyShockInputState({ mode: 'mach', ...defaults });
+            Units.applyDefaults(byId('shockForm'));
+            applyShockInputState({ mode: 'mach', gm: 'constant', ...defaults });
             clearInvalid(byId('shockForm'));
             clearShockOutputs();
             showMessages(byId('shockMessages'), []);
@@ -459,6 +504,12 @@ document.addEventListener('DOMContentLoaded', function () {
         }, 0);
     });
     byId('copyLinkBtn').addEventListener('click', copyShockLink);
+
+    // Redisplay results when the display units change
+    Units.onChange(function () {
+        if (appState.shock) displayShockResult(appState.shock);
+        if (byId('pboosttank').value !== '') calcBoost();
+    });
 
     // Timing and boost tank
     onSubmit('timingForm', calcTime);

@@ -5,6 +5,8 @@ const path = require('path');
 const vm = require('vm');
 
 const FILES = [
+    'nasa9-data.js',
+    'thermo.js',
     'gas-data.js',
     'shock-calc.js',
     'riemann-solver.js',
@@ -21,7 +23,8 @@ function load() {
     }
     return vm.runInContext(`({
         RU, GAS_DATABASE, stiffenedEffectiveMw, eosDensity, eosSoundSpeed,
-        mixtureProperties, validateGasDefinition,
+        mixtureProperties, validateGasDefinition, gasComposition,
+        NASA9_DATA, makeThermo,
         ShockInputError, computeShockTube, machFromDriverPressure, maxMachForDriver,
         solveExactRiemann, solveShockedInterface,
         EulerSolver

@@ -164,6 +164,137 @@ function downloadBlob(content, mimeType, filename) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Display units (calculations are always in SI)                       */
+/* ------------------------------------------------------------------ */
+
+const Units = {
+    STORAGE_KEY: 'stcalc_units',
+    // SI value = displayed value * scale + offset
+    table: {
+        pressure: {
+            'Pa': [1, 0], 'kPa': [1e3, 0], 'MPa': [1e6, 0], 'bar': [1e5, 0],
+            'atm': [101325, 0], 'psi': [6894.757293168, 0], 'Torr': [101325 / 760, 0]
+        },
+        temperature: { 'K': [1, 0], '°C': [1, 273.15], '°F': [5 / 9, 459.67 * 5 / 9] }
+    },
+    current: { pressure: 'kPa', temperature: 'K' },
+    listeners: [],
+
+    load() {
+        try {
+            const stored = JSON.parse(localStorage.getItem(this.STORAGE_KEY) || '{}');
+            for (const quantity in this.table) {
+                if (this.table[quantity][stored[quantity]]) this.current[quantity] = stored[quantity];
+            }
+        } catch (e) { /* keep defaults */ }
+    },
+
+    /** Change a unit; open inputs are converted so their physical value is kept. */
+    set(quantity, unit) {
+        if (!this.table[quantity][unit] || this.current[quantity] === unit) return;
+        const previous = { ...this.current };
+        this.current[quantity] = unit;
+        try {
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.current));
+        } catch (e) { /* storage unavailable */ }
+        this.convertInputs(document, previous);
+        this.updateLabels(document);
+        this.listeners.forEach(function (listener) { listener(); });
+    },
+
+    /** Gauge pressures share the pressure unit but have no offset. */
+    base(quantity) {
+        return quantity === 'gauge' ? 'pressure' : quantity;
+    },
+
+    toDisplay(quantity, si, unit) {
+        const q = this.base(quantity);
+        const def = this.table[q][unit || this.current[q]];
+        return quantity === 'gauge' ? si / def[0] : (si - def[1]) / def[0];
+    },
+
+    fromDisplay(quantity, value, unit) {
+        const q = this.base(quantity);
+        const def = this.table[q][unit || this.current[q]];
+        return quantity === 'gauge' ? value * def[0] : value * def[0] + def[1];
+    },
+
+    label(quantity) {
+        const unit = this.current[this.base(quantity)];
+        if (quantity !== 'gauge') return unit;
+        return unit === 'psi' ? 'psig' : unit + ' gauge';
+    },
+
+    /** Text for an input: seven significant digits, no trailing zeros. */
+    inputText(quantity, si) {
+        return String(Number(this.toDisplay(quantity, si).toPrecision(7)));
+    },
+
+    /**
+     * Show an SI value in an input. The exact value is remembered so that
+     * converting back and forth between units does not accumulate rounding.
+     */
+    setInput(input, si) {
+        input.value = this.inputText(input.dataset.quantity, si);
+        input._exact = { text: input.value, si: si };
+    },
+
+    /** SI value of an input's current text, or null if it is not a number. */
+    inputSI(input, unit) {
+        const text = input.value.trim();
+        if (text === '' || !isFinite(Number(text))) return null;
+        if (input._exact && input._exact.text === text) return input._exact.si;
+        return this.fromDisplay(input.dataset.quantity, Number(text), unit);
+    },
+
+    /** Fill unit labels: <span data-unit="pressure"> */
+    updateLabels(root) {
+        root.querySelectorAll('[data-unit]').forEach((node) => {
+            node.textContent = this.label(node.dataset.unit);
+        });
+    },
+
+    /** Set inputs carrying an SI default (data-si) to that value in display units. */
+    applyDefaults(root) {
+        root.querySelectorAll('input[data-quantity][data-si]').forEach((input) => {
+            this.setInput(input, Number(input.dataset.si));
+        });
+    },
+
+    convertInputs(root, previous) {
+        root.querySelectorAll('input[data-quantity]').forEach((input) => {
+            const si = this.inputSI(input, previous[this.base(input.dataset.quantity)]);
+            if (si !== null) this.setInput(input, si);
+        });
+    },
+
+    onChange(listener) {
+        this.listeners.push(listener);
+    }
+};
+
+/** Format an SI value in the current display unit. */
+function formatQuantity(quantity, si, digits) {
+    if (si === null || si === undefined || !isFinite(si)) return '—';
+    return formatSig(Units.toDisplay(quantity, si), digits);
+}
+
+/**
+ * Read an input holding a quantity in display units; returns SI.
+ * Temperatures and absolute pressures must be positive in SI.
+ * @throws {FieldError}
+ */
+function readQuantity(input, label, options) {
+    const quantity = input.dataset.quantity;
+    const value = readNumber(input, label, { optional: options && options.optional });
+    if (value === null) return null;
+    const si = Units.inputSI(input);
+    if (quantity === 'temperature' && !(si > 0)) throw new FieldError(input, label + ' must be above absolute zero.');
+    if (quantity !== 'temperature' && !(si > 0)) throw new FieldError(input, label + ' must be greater than zero.');
+    return si;
+}
+
+/* ------------------------------------------------------------------ */
 /* Custom gas library (persisted in localStorage)                      */
 /* ------------------------------------------------------------------ */
 
@@ -415,7 +546,7 @@ class GasPicker {
 
     /**
      * Thermodynamic properties of the current selection.
-     * @returns {{gamma:number, mw:number, pinf:number, name:string}}
+     * @returns {{gamma:number, mw:number, pinf:number, name:string, thermo:Array|null}}
      * @throws {FieldError} when nothing valid is selected
      */
     resolve() {
@@ -429,7 +560,7 @@ class GasPicker {
         }
         const gas = GasLibrary.get(this.select.value);
         if (!gas) throw new FieldError(this.select, 'Select a ' + label.toLowerCase() + '.');
-        return { gamma: gas.gamma, mw: gas.mw, pinf: gas.pinf, name: gas.name };
+        return { gamma: gas.gamma, mw: gas.mw, pinf: gas.pinf, name: gas.name, thermo: gasComposition(gas) };
     }
 }
 

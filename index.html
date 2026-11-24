@@ -21,6 +21,10 @@
   <a href="#xt">x-t diagram</a>
   <a href="#timing">Timing</a>
   <a href="#boost">Boost tank</a>
+  <span class="unit-picker">
+    <label>Pressure <select id="unitPressure"></select></label>
+    <label>Temperature <select id="unitTemperature"></select></label>
+  </span>
 </nav>
 
 <!-- ============================ Shock tube ============================ -->
@@ -47,16 +51,16 @@
     <span class="unit" data-mode="mach"></span>
 
     <label for="p4input" data-mode="pressure" title="Absolute pressure at diaphragm rupture" hidden>Driver pressure</label>
-    <input id="p4input" type="number" step="any" min="0" value="800000" inputmode="decimal" data-mode="pressure" hidden>
-    <span class="unit" data-mode="pressure" hidden>Pa</span>
+    <input id="p4input" type="number" step="any" data-quantity="pressure" data-si="800000" inputmode="decimal" data-mode="pressure" hidden>
+    <span class="unit" data-mode="pressure" data-unit="pressure" hidden></span>
 
     <label for="pinit" title="Absolute pressure">Driven pressure</label>
-    <input id="pinit" type="number" step="any" min="0" value="101325" inputmode="decimal">
-    <span class="unit">Pa</span>
+    <input id="pinit" type="number" step="any" data-quantity="pressure" data-si="101325" inputmode="decimal">
+    <span class="unit" data-unit="pressure"></span>
 
     <label for="tinit">Driven temperature</label>
-    <input id="tinit" type="number" step="any" min="0" value="300" inputmode="decimal">
-    <span class="unit">K</span>
+    <input id="tinit" type="number" step="any" data-quantity="temperature" data-si="300" inputmode="decimal">
+    <span class="unit" data-unit="temperature"></span>
 
     <label for="driverGas">Driver gas</label>
     <select id="driverGas"></select>
@@ -64,8 +68,15 @@
     <div id="driverMixture" class="mixture full" hidden></div>
 
     <label for="tid">Driver temperature</label>
-    <input id="tid" type="number" step="any" min="0" value="300" inputmode="decimal">
-    <span class="unit">K</span>
+    <input id="tid" type="number" step="any" data-quantity="temperature" data-si="300" inputmode="decimal">
+    <span class="unit" data-unit="temperature"></span>
+
+    <label for="gasModel" title="Constant γ reproduces the original calculator. Variable γ uses NASA polynomial specific heats with frozen composition; liquids and the x-t solver always use constant γ.">Gas model</label>
+    <select id="gasModel">
+      <option value="constant" selected>Constant γ</option>
+      <option value="nasa">Variable γ (NASA)</option>
+    </select>
+    <span class="unit"></span>
 
     <label for="areafact" title="Divides the gauge driver pressure estimate. Use 1 for a constant-area tube.">Area contraction factor</label>
     <input id="areafact" type="number" step="any" min="0" value="1.35" inputmode="decimal">
@@ -114,10 +125,11 @@
   <tr><th scope="col"></th><th scope="col">Unshocked</th><th scope="col">Shocked</th><th scope="col">Driver</th><th scope="col">Reshocked</th></tr>
   </thead>
   <tbody>
-  <tr><th scope="row">Pressure <span class="unit">MPa</span></th><td><output id="pdriv"></output></td><td><output id="pshocked"></output></td><td><output id="pfour"></output></td><td><output id="preflect"></output></td></tr>
-  <tr><th scope="row">Temperature <span class="unit">K</span></th><td><output id="tdriv"></output></td><td><output id="tshocked"></output></td><td><output id="tfour"></output></td><td><output id="treflect"></output></td></tr>
+  <tr><th scope="row">Pressure <span class="unit" data-unit="pressure"></span></th><td><output id="pdriv"></output></td><td><output id="pshocked"></output></td><td><output id="pfour"></output></td><td><output id="preflect"></output></td></tr>
+  <tr><th scope="row">Temperature <span class="unit" data-unit="temperature"></span></th><td><output id="tdriv"></output></td><td><output id="tshocked"></output></td><td><output id="tfour"></output></td><td><output id="treflect"></output></td></tr>
   <tr><th scope="row">Density <span class="unit">kg/m³</span></th><td><output id="ddriv"></output></td><td><output id="dshocked"></output></td><td><output id="dfour"></output></td><td><output id="dreflect"></output></td></tr>
   <tr><th scope="row">Sound speed <span class="unit">m/s</span></th><td><output id="adriv"></output></td><td><output id="ashocked"></output></td><td><output id="afour"></output></td><td><output id="areflect"></output></td></tr>
+  <tr><th scope="row">γ</th><td><output id="gdriv"></output></td><td><output id="gshocked"></output></td><td><output id="gfour"></output></td><td><output id="greflect"></output></td></tr>
   <tr><th scope="row">Velocity <span class="unit">m/s</span></th><td>0</td><td><output id="ushocked"></output></td><td>0</td><td>0</td></tr>
   </tbody>
 </table>
@@ -128,8 +140,7 @@
     <label for="wshocked">Incident shock speed</label><output id="wshocked"></output><span class="unit">m/s</span>
     <label for="wreflect" title="Lab frame">Reflected shock speed</label><output id="wreflect"></output><span class="unit">m/s</span>
     <label for="mreflect">Reflected shock Mach number</label><output id="mreflect"></output><span class="unit"></span>
-    <label for="pfourpsig" title="Gauge pressure divided by the area contraction factor">Approximate driver pressure</label><output id="pfourpsig"></output><span class="unit">psig</span>
-    <label for="outgamma">Driven gas γ</label><output id="outgamma"></output><span class="unit"></span>
+    <label for="pfourpsig" title="Gauge pressure divided by the area contraction factor">Approximate driver pressure</label><output id="pfourpsig"></output><span class="unit" data-unit="gauge"></span>
     <label for="outmw" id="outmwLabel">Driven gas molecular weight</label><output id="outmw"></output><span class="unit">g/mol</span>
   </div>
   <button type="button" class="secondary small" id="showEquationsBtn">View equations</button>
@@ -154,8 +165,8 @@
     <div id="interfaceHeavyMixture" class="mixture full" hidden></div>
 
     <label for="interfaceHeavyTemp" title="Pressure equals the driven pressure">Downstream temperature</label>
-    <input type="number" id="interfaceHeavyTemp" value="300" min="0" step="any" inputmode="decimal">
-    <span class="unit">K</span>
+    <input type="number" id="interfaceHeavyTemp" data-quantity="temperature" data-si="300" step="any" inputmode="decimal">
+    <span class="unit" data-unit="temperature"></span>
 
     <label for="perturbWavelength">Perturbation wavelength λ</label>
     <input type="number" id="perturbWavelength" value="10" min="0" step="any" inputmode="decimal">
@@ -179,7 +190,7 @@
   <h3>Results</h3>
   <div class="fields compact">
     <label for="interfaceVelocity">Interface velocity</label><output id="interfaceVelocity"></output><span class="unit">m/s</span>
-    <label for="interfacePressure">Interface pressure</label><output id="interfacePressure"></output><span class="unit">MPa</span>
+    <label for="interfacePressure">Interface pressure</label><output id="interfacePressure"></output><span class="unit" data-unit="pressure"></span>
     <label for="atwoodNumber" title="From post-wave densities">Atwood number</label><output id="atwoodNumber"></output><span class="unit"></span>
     <label for="waveConfigLeft" title="Travels back into the driven gas">Reflected wave</label><output id="waveConfigLeft"></output><span class="unit"></span>
     <label for="waveConfigRight" title="Travels into the downstream gas">Transmitted wave</label><output id="waveConfigRight"></output><span class="unit"></span>
@@ -189,8 +200,8 @@
     <tr><th scope="col"></th><th scope="col" title="Behind the reflected wave">Driven gas</th><th scope="col" title="Behind the transmitted wave">Downstream gas</th></tr>
     </thead>
     <tbody>
-    <tr><th scope="row">Pressure <span class="unit">MPa</span></th><td><output id="lightGasPressure"></output></td><td><output id="heavyGasPressure"></output></td></tr>
-    <tr><th scope="row">Temperature <span class="unit">K</span></th><td><output id="lightGasTemp"></output></td><td><output id="heavyGasTemp"></output></td></tr>
+    <tr><th scope="row">Pressure <span class="unit" data-unit="pressure"></span></th><td><output id="lightGasPressure"></output></td><td><output id="heavyGasPressure"></output></td></tr>
+    <tr><th scope="row">Temperature <span class="unit" data-unit="temperature"></span></th><td><output id="lightGasTemp"></output></td><td><output id="heavyGasTemp"></output></td></tr>
     <tr><th scope="row">Density <span class="unit">kg/m³</span></th><td><output id="lightGasDensity"></output></td><td><output id="heavyGasDensity"></output></td></tr>
     <tr><th scope="row">Sound speed <span class="unit">m/s</span></th><td><output id="lightGasSound"></output></td><td><output id="heavyGasSound"></output></td></tr>
     </tbody>
@@ -326,7 +337,7 @@
     <input id="boostvol" type="number" step="any" min="0" value="0.0538" inputmode="decimal"><span class="unit">m³</span>
 
     <label for="prupture">Rupture pressure</label>
-    <input id="prupture" type="number" step="any" inputmode="decimal"><span class="unit">psig</span>
+    <input id="prupture" type="number" step="any" data-quantity="gauge" inputmode="decimal"><span class="unit" data-unit="gauge"></span>
 
     <label for="percless" title="Percent below the rupture pressure">Pre-boost margin</label>
     <input id="percless" type="number" step="any" min="0" value="5" inputmode="decimal"><span class="unit">%</span>
@@ -341,9 +352,9 @@
 </form>
 <div class="messages" id="boostMessages" role="status" aria-live="polite"></div>
 <div class="fields compact">
-  <label for="ppreboost">Pre-boost driver pressure</label><output id="ppreboost"></output><span class="unit">psig</span>
-  <label for="ppostboost">Post-boost driver pressure</label><output id="ppostboost"></output><span class="unit">psig</span>
-  <label for="pboosttank" title="Isothermal ideal-gas estimate; independent of the gas">Boost tank pressure</label><output id="pboosttank"></output><span class="unit">psig</span>
+  <label for="ppreboost">Pre-boost driver pressure</label><output id="ppreboost"></output><span class="unit" data-unit="gauge"></span>
+  <label for="ppostboost">Post-boost driver pressure</label><output id="ppostboost"></output><span class="unit" data-unit="gauge"></span>
+  <label for="pboosttank" title="Isothermal ideal-gas estimate; independent of the gas">Boost tank pressure</label><output id="pboosttank"></output><span class="unit" data-unit="gauge"></span>
 </div>
 </section>
 </div>
@@ -428,12 +439,22 @@ Submit issues &amp; feature requests on
       Every relation above holds with each pressure \(p\) replaced by \(p + p_\infty\).</p>
     </div>
 
+    <div class="equation-section">
+      <h3>Variable \(\gamma\)</h3>
+      <p>With the variable-\(\gamma\) gas model the gas is still ideal, \(p = \rho R T\), but \(c_p(T)\) comes from NASA polynomial fits
+      and the composition is frozen. The shock states then solve the conservation laws directly,
+      $$\rho_1 W = \rho_2 (W - u_2), \qquad p_1 + \rho_1 W^2 = p_2 + \rho_2 (W - u_2)^2, \qquad h(T_1) + \tfrac{1}{2} W^2 = h(T_2) + \tfrac{1}{2} (W - u_2)^2,$$
+      and the driver expansion integrates \(du = -c_p\,dT / a\) along an isentrope.</p>
+    </div>
+
     <div class="equation-note">
       <strong>Reference:</strong> Equations taken from <em>Modern Compressible Flow with Historical Perspective</em>, Anderson, 2nd ed.
     </div>
   </div>
 </div>
 
+<script src="js/nasa9-data.js"></script>
+<script src="js/thermo.js"></script>
 <script src="js/gas-data.js"></script>
 <script src="js/shock-calc.js"></script>
 <script src="js/riemann-solver.js"></script>

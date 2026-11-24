@@ -60,7 +60,7 @@ function renderXTSlabs() {
         const select = el('select', { 'aria-label': 'Slab ' + n + ' gas' });
         const mixture = el('div', { class: 'mixture', hidden: true });
         const numberField = function (label, value, onInput) {
-            const input = el('input', { type: 'number', step: 'any', min: '0', inputMode: 'decimal', value: value });
+            const input = el('input', { type: 'number', step: 'any', inputMode: 'decimal', value: value });
             input.addEventListener('input', function () { onInput(input.value === '' ? NaN : Number(input.value)); });
             return el('label', { class: 'slab-field' }, el('span', {}, label), input);
         };
@@ -69,8 +69,10 @@ function renderXTSlabs() {
             el('div', { class: 'slab-number' }, '#' + n),
             el('div', { class: 'slab-controls' },
                 el('label', { class: 'slab-field' }, el('span', {}, 'Material'), select),
-                numberField('Pressure (kPa)', Number((slab.pressure / 1000).toPrecision(7)), function (v) { slab.pressure = v * 1000; }),
-                numberField('Temperature (K)', slab.temperature, function (v) { slab.temperature = v; }),
+                numberField('Pressure (' + Units.label('pressure') + ')', Units.inputText('pressure', slab.pressure),
+                    function (v) { slab.pressure = Units.fromDisplay('pressure', v); }),
+                numberField('Temperature (' + Units.label('temperature') + ')', Units.inputText('temperature', slab.temperature),
+                    function (v) { slab.temperature = Units.fromDisplay('temperature', v); }),
                 numberField('Length (m)', slab.length, function (v) { slab.length = v; })),
             el('div', { class: 'slab-actions' },
                 el('button', { type: 'button', class: 'secondary small', disabled: index === 0, 'aria-label': 'Move slab ' + n + ' toward the driver end', onclick: function () { move(index, -1); } }, '↑'),
@@ -306,7 +308,7 @@ function renderXTProbes() {
 
     const series = xtProbePositions.map(function (x) {
         return probeSeries(xtResults, x, fieldKey).map(function (point) {
-            return { t: point.t * 1000, value: point.value * field.scale };
+            return { t: point.t * 1000, value: xtFieldToDisplay(fieldKey, point.value) };
         });
     });
     let lo = Infinity, hi = -Infinity;
@@ -368,7 +370,7 @@ function renderXTProbes() {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
     ctx.fillText('Time (ms)', margin.left + plotWidth / 2, height - 10);
-    const axisLabel = field.label + ' (' + field.unit + ')';
+    const axisLabel = field.label + ' (' + xtFieldUnit(fieldKey) + ')';
     if (narrow) {
         // No room beside the tick labels: put the axis label in the top corner
         ctx.textAlign = 'right';
@@ -422,14 +424,14 @@ function exportXTTracerCSV() {
 }
 
 function exportXTProbeCSV() {
-    const fields = ['p', 'rho', 'T', 'u'];
+    // Files always use the same units, whatever the page displays
+    const fields = [['p', 'Pressure (kPa)', 1e-3], ['rho', 'Density (kg/m³)', 1], ['T', 'Temperature (K)', 1], ['u', 'Velocity (m/s)', 1]];
     const header = ['Time (ms)'];
     const columns = [];
     xtProbePositions.forEach(function (x) {
-        fields.forEach(function (key) {
-            const f = XT_FIELDS[key];
-            header.push(csvCell(f.label + ' (' + f.unit + ') at x = ' + x + ' m'));
-            columns.push(probeSeries(xtResults, x, key).map(function (point) { return point.value * f.scale; }));
+        fields.forEach(function (f) {
+            header.push(csvCell(f[1] + ' at x = ' + x + ' m'));
+            columns.push(probeSeries(xtResults, x, f[0]).map(function (point) { return point.value * f[2]; }));
         });
     });
     const lines = [header.join(',')];
@@ -496,6 +498,17 @@ document.addEventListener('DOMContentLoaded', function () {
     });
     byId('xtLogScale').addEventListener('change', function () {
         if (xtVisualization) xtVisualization.setLogScale(byId('xtLogScale').checked);
+    });
+
+    Units.onChange(function () {
+        if (xtSlabs.length > 0) {
+            syncXTSlabGases();
+            renderXTSlabs();
+        }
+        if (xtResults && !byId('xtCanvasContainer').hidden) {
+            xtVisualization.render();
+            renderXTProbes();
+        }
     });
 
     onResizeEnd(function () {

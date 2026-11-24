@@ -7,7 +7,7 @@ A 1D multicomponent compressible Euler solver that runs in the browser and draws
 1. Open **x-t diagram** on the page. If the shock tube calculation has been run, the driver and driven slabs start from its states; otherwise a helium/air example is shown. **Use driver and driven states from the shock tube calculation** re-imports them at any time and leaves slabs 3 and up alone.
 2. Edit the slabs. They are listed from the driver end wall to the driven end wall. Each has a gas, liquid or mixture, a pressure, a temperature and a length. Add more slabs for test-section gases, liquids or buffer layers.
 3. Optionally enter probe positions to get time histories at fixed locations, as a pressure transducer would record.
-4. Run. Choose the plotted field (pressure, density, temperature, velocity) and a linear or logarithmic color scale afterwards without re-running. Hover over the diagram to read all four values at a point.
+4. Run. Choose the plotted field (pressure, density, temperature, velocity) and a linear or logarithmic color scale afterwards without re-running. Hover over the diagram to read all four values at a point. Pressure and temperature use the units chosen at the top of the page; exported files always use kPa and K.
 5. Export the image, the full x-t field, interface paths or probe traces as CSV, or everything as JSON or HDF5.
 
 ## Numerical method
@@ -34,7 +34,7 @@ p = (γ − 1) ρ e − γ p∞        p + p∞ = ρ R T        a² = γ (p + p�
 
 ### Limits
 
-- Constant γ: no vibrational excitation, dissociation, or phase change (no cavitation).
+- Constant γ, even when the shock tube calculator is set to variable γ: no vibrational excitation, dissociation, or phase change (no cavitation).
 - Inviscid and one-dimensional: no boundary layers, diaphragm opening or area changes.
 - First-order accuracy smears shocks over a few cells and contacts over more; increase the grid cells to sharpen them.
 

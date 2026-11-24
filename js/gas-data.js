@@ -24,17 +24,25 @@ function stiffenedEffectiveMw(pinf, rhoRef, tRef = STP_REF_T, pRef = STP_REF_P) 
     return RU * rhoRef * tRef / (pRef + pinf);
 }
 
+// gamma and mw are the constant-gamma values of the original calculator.
+// "nasa" lists [species, mole fraction] pairs in js/nasa9-data.js, used by the
+// temperature-dependent gas model.
 const GAS_DATABASE = {
-    "1": { name: "Air", gamma: 1.4020, mw: 28.9660 },
-    "2": { name: "Argon", gamma: 1.6700, mw: 39.948 },
-    "3": { name: "Carbon Dioxide", gamma: 1.297, mw: 44.01 },
-    "4": { name: "Helium", gamma: 1.667, mw: 4.002602 },
-    "5": { name: "Neon", gamma: 1.667, mw: 20.1797 },
-    "6": { name: "Nitrogen", gamma: 1.401, mw: 28.0134 },
-    "7": { name: "Xenon", gamma: 1.667, mw: 131.29 },
-    "8": { name: "Sulfur Hexafluoride", gamma: 1.092, mw: 146.06 },
+    "1": { name: "Air", gamma: 1.4020, mw: 28.9660,
+           nasa: [["N2", 0.78084], ["O2", 0.209476], ["Ar", 0.009365], ["CO2", 0.000319]] },
+    "2": { name: "Argon", gamma: 1.6700, mw: 39.948, nasa: [["Ar", 1]] },
+    "3": { name: "Carbon Dioxide", gamma: 1.297, mw: 44.01, nasa: [["CO2", 1]] },
+    "4": { name: "Helium", gamma: 1.667, mw: 4.002602, nasa: [["He", 1]] },
+    "5": { name: "Neon", gamma: 1.667, mw: 20.1797, nasa: [["Ne", 1]] },
+    "6": { name: "Nitrogen", gamma: 1.401, mw: 28.0134, nasa: [["N2", 1]] },
+    "7": { name: "Xenon", gamma: 1.667, mw: 131.29, nasa: [["Xe", 1]] },
+    "8": { name: "Sulfur Hexafluoride", gamma: 1.092, mw: 146.06, nasa: [["SF6", 1]] },
     "9": { name: "Helium-Neon", gamma: 1.668, mw: 21.98 },
-    "10": { name: "Acetone Vapor", gamma: 1.14, mw: 58.08 },
+    "10": { name: "Acetone Vapor", gamma: 1.14, mw: 58.08, nasa: [["C3H6O,acetone", 1]] },
+    "11": { name: "Hydrogen", gamma: 1.405, mw: 2.01588, nasa: [["H2", 1]] },
+    "12": { name: "Krypton", gamma: 1.667, mw: 83.798, nasa: [["Kr", 1]] },
+    "13": { name: "Oxygen", gamma: 1.395, mw: 31.9988, nasa: [["O2", 1]] },
+    "14": { name: "Methane", gamma: 1.304, mw: 16.0425, nasa: [["CH4", 1]] },
     // Stiffened-gas fit for liquid water: a = 1450 m/s and rho = 998.2 kg/m3
     // at 293.15 K, 1 atm.
     "water": {
@@ -51,8 +59,20 @@ function normalizeGas(gas) {
         name: gas.name,
         gamma: gas.gamma,
         mw: gas.mw,
-        pinf: gas.pinf > 0 ? gas.pinf : 0
+        pinf: gas.pinf > 0 ? gas.pinf : 0,
+        nasa: gas.nasa || null
     };
+}
+
+/**
+ * Composition of a gas for the temperature-dependent model (see thermo.js):
+ * NASA-9 species where known, otherwise one constant-cp pseudo-species.
+ * Liquids have no such model and return null.
+ */
+function gasComposition(gas) {
+    if (isStiffened(gas)) return null;
+    if (gas.nasa) return gas.nasa.map(function (entry) { return { species: entry[0], x: entry[1] }; });
+    return [{ gamma: gas.gamma, mw: gas.mw, x: 1 }];
 }
 
 function isStiffened(gas) {
@@ -87,7 +107,7 @@ function validateGasDefinition(def) {
  * Properties of a mole-fraction mixture of ideal gases.
  * @param {Array<{gasId:string, fraction:number}>} components
  * @param {Object} gases - lookup of gasId -> gas record
- * @returns {{gamma:number, mw:number, pinf:number, name:string}}
+ * @returns {{gamma:number, mw:number, pinf:number, name:string, thermo:Array|null}}
  * @throws {Error} with a user-readable message when the mixture is invalid
  */
 function mixtureProperties(components, gases) {
@@ -117,7 +137,19 @@ function mixtureProperties(components, gases) {
         cv += fraction * cvI;
         cp += fraction * gas.gamma * cvI;
     }
+    // Composition for the temperature-dependent model
+    let thermo = [];
+    for (const { gas, fraction } of valid) {
+        const parts = gasComposition(gas);
+        if (!parts) {
+            thermo = null;
+            break;
+        }
+        for (const part of parts) thermo.push({ ...part, x: part.x * fraction });
+    }
+
     return {
+        thermo: thermo,
         gamma: cp / cv,
         mw: mw / total,
         pinf: valid.length === 1 ? (valid[0].gas.pinf || 0) : 0,
@@ -128,7 +160,7 @@ function mixtureProperties(components, gases) {
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         RU, STP_REF_T, STP_REF_P, GAS_DATABASE,
-        stiffenedEffectiveMw, normalizeGas, isStiffened, gasConstant,
+        stiffenedEffectiveMw, normalizeGas, isStiffened, gasConstant, gasComposition,
         eosDensity, eosSoundSpeed, validateGasDefinition, mixtureProperties
     };
 }

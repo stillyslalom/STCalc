@@ -45,12 +45,29 @@ const INFERNO_LUT = new Uint8Array([
 
 const INFERNO_LAST = INFERNO_LUT.length / 3 - 1;
 
+// Fields that can be plotted. Pressure and temperature follow the display
+// units chosen on the page (see Units in ui-common.js); stored data is SI.
 const XT_FIELDS = {
-    p:   { label: 'Pressure', unit: 'kPa', scale: 1e-3 },
-    rho: { label: 'Density', unit: 'kg/m³', scale: 1 },
-    T:   { label: 'Temperature', unit: 'K', scale: 1 },
-    u:   { label: 'Velocity', unit: 'm/s', scale: 1 }
+    p:   { label: 'Pressure', quantity: 'pressure' },
+    rho: { label: 'Density', unit: 'kg/m³' },
+    T:   { label: 'Temperature', quantity: 'temperature' },
+    u:   { label: 'Velocity', unit: 'm/s' }
 };
+
+function xtFieldUnit(key) {
+    const field = XT_FIELDS[key];
+    return field.quantity ? Units.label(field.quantity) : field.unit;
+}
+
+function xtFieldToDisplay(key, si) {
+    const field = XT_FIELDS[key];
+    return field.quantity ? Units.toDisplay(field.quantity, si) : si;
+}
+
+function xtFieldFromDisplay(key, value) {
+    const field = XT_FIELDS[key];
+    return field.quantity ? Units.fromDisplay(field.quantity, value) : value;
+}
 
 class XTVisualization {
     constructor(canvasId) {
@@ -308,7 +325,7 @@ class XTVisualization {
         // The color scale is labelled above the color bar
         ctx.font = 'bold 13px Arial';
         ctx.textAlign = 'right';
-        ctx.fillText(field.label + ' (' + field.unit + ')', this.width - 6, this.margin.top - 12);
+        ctx.fillText(field.label + ' (' + xtFieldUnit(this.field) + ')', this.width - 6, this.margin.top - 12);
     }
 
     drawColorbar() {
@@ -331,9 +348,10 @@ class XTVisualization {
 
         ctx.font = '11px Arial';
         ctx.textAlign = 'left';
-        const lo = this.vMin * field.scale, hi = this.vMax * field.scale;
+        const lo = xtFieldToDisplay(this.field, this.vMin), hi = xtFieldToDisplay(this.field, this.vMax);
+        const decades = this.logScaleActive() && lo > 0;   // e.g. not for °C below zero
         let ticks;
-        if (this.logScaleActive()) {
+        if (decades) {
             ticks = [];
             for (let e = Math.ceil(Math.log10(lo) - 1e-9); e <= Math.floor(Math.log10(hi) + 1e-9); e++) ticks.push(Math.pow(10, e));
             if (ticks.length < 2) ticks = [lo, Math.sqrt(lo * hi), hi];
@@ -341,11 +359,11 @@ class XTVisualization {
             ticks = niceTicks(lo, hi, this.narrow ? 4 : 6);
         }
         for (const value of ticks) {
-            const norm = this.normalize(value / field.scale);
+            const norm = this.normalize(xtFieldFromDisplay(this.field, value));
             if (norm < -1e-9 || norm > 1 + 1e-9) continue;
             const y = barY + barHeight - norm * barHeight;
             ctx.beginPath(); ctx.moveTo(barX + barWidth, y); ctx.lineTo(barX + barWidth + 4, y); ctx.stroke();
-            const label = this.logScaleActive() ? Number(value.toPrecision(3)).toString() : tickLabel(value, ticks);
+            const label = decades ? Number(value.toPrecision(3)).toString() : tickLabel(value, ticks);
             ctx.fillText(label, barX + barWidth + 7, y + 4);
         }
 
@@ -365,8 +383,8 @@ class XTVisualization {
         const snapshot = this.results.xtData[j];
         const lines = [
             `x ${x.toFixed(3)} m, t ${(t * 1000).toFixed(3)} ms`,
-            `p ${(snapshot.p[i] / 1000).toPrecision(5)} kPa`,
-            `T ${snapshot.T[i].toPrecision(5)} K`,
+            `p ${xtFieldToDisplay('p', snapshot.p[i]).toPrecision(5)} ${xtFieldUnit('p')}`,
+            `T ${xtFieldToDisplay('T', snapshot.T[i]).toPrecision(5)} ${xtFieldUnit('T')}`,
             `ρ ${snapshot.rho[i].toPrecision(5)} kg/m³`,
             `u ${snapshot.u[i].toFixed(2)} m/s`
         ];

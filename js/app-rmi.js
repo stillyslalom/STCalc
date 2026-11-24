@@ -6,6 +6,13 @@
 let interfacePicker;
 let rmiGrowth = null;   // last plotted series, kept for redrawing on resize
 
+/** Constant-gamma stand-in for a gas, evaluated at temperature T when the variable model is on. */
+function frozenGas(gas, T, variableGamma) {
+    if (!variableGamma || !gas.thermo || gas.pinf > 0) return gas;
+    const th = makeThermo(gas.thermo);
+    return { gamma: th.gamma(T), mw: th.mw, pinf: 0 };
+}
+
 function calculateInterface() {
     const form = byId('interfaceForm');
     const messages = byId('interfaceMessages');
@@ -18,29 +25,30 @@ function calculateInterface() {
         if (!shock) throw userError('Run the shock tube calculation first.');
 
         const downstream = interfacePicker.resolve();
-        const tDownstream = readNumber(byId('interfaceHeavyTemp'), 'Downstream temperature', { positive: true });
+        const tDownstream = readQuantity(byId('interfaceHeavyTemp'), 'Downstream temperature');
         const lambda = readNumber(byId('perturbWavelength'), 'Wavelength', { positive: true }) / 1000;
         const a0 = readNumber(byId('perturbAmplitude'), 'Initial amplitude', { positive: true }) / 1000;
         const distance = readNumber(byId('rmiDownstreamDist'), 'Diagnostic distance', { positive: true }) / 1000;
 
         // Left: shocked driven gas moving at u2. Right: downstream material at rest.
+        // With the variable-gamma model each gas uses gamma at its own temperature
         const result = solveShockedInterface(
-            { ...inputs.driven, p: shock.state2.p, T: shock.state2.T, u: shock.state2.u },
-            { ...downstream, p: inputs.p1, T: tDownstream, u: 0 });
+            { gamma: shock.state2.gamma, mw: shock.mw, pinf: shock.pinf, p: shock.state2.p, T: shock.state2.T, u: shock.state2.u },
+            { ...frozenGas(downstream, tDownstream, inputs.variableGamma), p: inputs.p1, T: tDownstream, u: 0 });
 
         const set = function (id, value) { byId(id).value = value; };
         set('interfaceVelocity', formatSig(result.interfaceVelocity));
-        set('interfacePressure', formatSig(result.interfacePressure / 1e6));
+        set('interfacePressure', formatQuantity('pressure', result.interfacePressure));
         set('atwoodNumber', formatSig(result.atwoodNumber));
         set('waveConfigLeft', result.waveConfig.left === 'shock' ? 'Shock' : 'Rarefaction');
         set('waveConfigRight', result.waveConfig.right === 'shock' ? 'Shock' : 'Rarefaction');
 
-        set('lightGasPressure', formatSig(result.lightGasPost.p / 1e6));
-        set('lightGasTemp', formatSig(result.lightGasPost.T));
+        set('lightGasPressure', formatQuantity('pressure', result.lightGasPost.p));
+        set('lightGasTemp', formatQuantity('temperature', result.lightGasPost.T));
         set('lightGasDensity', formatSig(result.lightGasPost.rho));
         set('lightGasSound', formatSig(result.lightGasPost.a));
-        set('heavyGasPressure', formatSig(result.heavyGasPost.p / 1e6));
-        set('heavyGasTemp', formatSig(result.heavyGasPost.T));
+        set('heavyGasPressure', formatQuantity('pressure', result.heavyGasPost.p));
+        set('heavyGasTemp', formatQuantity('temperature', result.heavyGasPost.T));
         set('heavyGasDensity', formatSig(result.heavyGasPost.rho));
         set('heavyGasSound', formatSig(result.heavyGasPost.a));
 
@@ -161,6 +169,10 @@ document.addEventListener('DOMContentLoaded', function () {
     byId('interfaceForm').addEventListener('submit', function (event) {
         event.preventDefault();
         calculateInterface();
+    });
+
+    Units.onChange(function () {
+        if (!byId('interfaceResults').hidden) calculateInterface();
     });
 
     onResizeEnd(function () {
