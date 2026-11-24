@@ -92,7 +92,8 @@ function calcShock() {
             p1: readQuantity(byId('pinit'), 'Driven pressure'),
             t1: readQuantity(byId('tinit'), 'Driven temperature'),
             t4: readQuantity(byId('tid'), 'Driver temperature'),
-            areaFactor: readNumber(byId('areafact'), 'Area contraction factor', { positive: true }),
+            areaRatio: readNumber(byId('arearatio'), 'Area ratio', { min: 1 }),
+            areaFactor: readNumber(byId('areafact'), 'Empirical area factor', { positive: true }),
             variableGamma: byId('gasModel').value === 'nasa',
             formatTemperature: function (T) { return formatQuantity('temperature', T, 4) + ' ' + Units.label('temperature'); }
         };
@@ -126,7 +127,7 @@ function calcShock() {
 /* ------------------------------------------------------------------ */
 
 // Saved states and links hold SI values (Pa, K) whatever units are displayed
-const SHOCK_FIELDS = { m: 'mach', p4: 'p4input', p1: 'pinit', t1: 'tinit', t4: 'tid', af: 'areafact' };
+const SHOCK_FIELDS = { m: 'mach', p4: 'p4input', p1: 'pinit', t1: 'tinit', t4: 'tid', ar: 'arearatio', af: 'areafact' };
 
 function readShockInputState() {
     const state = {

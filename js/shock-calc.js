@@ -72,23 +72,45 @@ function constantGammaModel(gas) {
             const s5 = state(r52 * (s2.p + pinf), s2.T * r52 / dr, 0);
             return { state: s5, speed: s2.rho * s2.u / (s5.rho - s2.rho) };
         },
-        /** Fastest speed an unsteady expansion from rest at T4 can reach. */
-        maxExpansionVelocity: function (T4) {
+        /** Fastest speed the driver gas can reach, starting from rest at T4. */
+        maxExpansionVelocity: function (T4, areaRatio) {
+            if (areaRatio > 1) return areaChangeExpansion(this.isentrope(T4), T4, Infinity, areaRatio).maxVelocity;
             return 2 * Math.sqrt(g * R * T4) / gm;
         },
         /** Initial pressure that expands isentropically from rest at T4 to (u, p). */
-        expansionSourcePressure: function (T4, u, p) {
+        expansionSourcePressure: function (T4, u, p, areaRatio) {
+            if (areaRatio > 1) {
+                const isen = this.isentrope(T4);
+                const T3 = areaChangeExpansion(isen, T4, u, areaRatio).temperature;
+                if (T3 === null) return null;
+                const p4 = (p + pinf) / isen.pressureRatio(T3) - pinf;
+                return isFinite(p4) ? p4 : null;
+            }
             const arg = 1 - gm * u / (2 * Math.sqrt(g * R * T4));
             if (!(arg > 0)) return null;
             const p4 = (p + pinf) * Math.pow(arg, -2 * g / gm) - pinf;
             return isFinite(p4) ? p4 : null;
+        },
+        /** Property functions along the isentrope through the driver state. */
+        isentrope: function (T4) {
+            return {
+                a: function (T) { return Math.sqrt(g * R * T); },
+                h: function (T) { return g * R * T / gm; },
+                density: function (T) { return Math.pow(T / T4, 1 / gm); },           // relative to state 4
+                pressureRatio: function (T) { return Math.pow(T / T4, g / gm); },     // (p + pinf) / (p4 + pinf)
+                // Speed gained in an unsteady expansion that cools the gas from Ta to Tb
+                velocity: function (Ta, Tb) { return 2 * (Math.sqrt(g * R * Ta) - Math.sqrt(g * R * Math.max(Tb, 0))) / gm; }
+            };
         }
     };
 }
 
-/** Bisection for a root of f bracketed by [lo, hi]. */
+/** Bisection for a root of f bracketed by [lo, hi]; the nearer end if there is no sign change. */
 function shockBisect(f, lo, hi) {
     let flo = f(lo);
+    const fhi = f(hi);
+    // Round-off can remove the sign change when the root sits at an end
+    if ((fhi > 0) === (flo > 0)) return Math.abs(flo) <= Math.abs(fhi) ? lo : hi;
     for (let i = 0; i < 200; i++) {
         const mid = 0.5 * (lo + hi);
         if (mid === lo || mid === hi) break;
@@ -96,6 +118,68 @@ function shockBisect(f, lo, hi) {
         if ((fmid > 0) === (flo > 0)) { lo = mid; flo = fmid; } else { hi = mid; }
     }
     return 0.5 * (lo + hi);
+}
+
+/**
+ * Driver expansion through an area contraction at the diaphragm
+ * (driver area / driven area = areaRatio >= 1), after Alpher & White (1958):
+ *
+ *   1. an unsteady expansion in the driver, from rest to a subsonic state 3a;
+ *   2. a steady isentropic nozzle from the driver area to the driven area,
+ *      reaching state 3b (sonic if the nozzle chokes);
+ *   3. if choked, a second unsteady expansion in the driven tube.
+ *
+ * The whole process is isentropic, so it is described by the temperature the
+ * driver gas ends at.
+ *
+ * @param {Object} isen - property functions along the isentrope (see isentrope())
+ * @param {number} T4 - driver temperature
+ * @param {number} u - velocity the gas must reach (that of the shocked gas)
+ * @returns {{temperature: number|null, maxVelocity: number}} final temperature,
+ *   or null when the velocity cannot be reached
+ */
+function areaChangeExpansion(isen, T4, u, areaRatio) {
+    const low = 1e-9 * T4;
+
+    // Steady nozzle fed by state 3a at temperature Ta
+    const nozzle = function (Ta) {
+        const ua = isen.velocity(T4, Ta);
+        const H0 = isen.h(Ta) + 0.5 * ua * ua;
+        // Sonic state for this stagnation enthalpy, and the mass flux it passes
+        const Tstar = shockBisect(function (T) { return isen.h(T) + 0.5 * isen.a(T) * isen.a(T) - H0; }, low, T4);
+        return {
+            H0: H0, Tstar: Tstar,
+            flux: areaRatio * isen.density(Ta) * ua,              // per unit driven area
+            sonicFlux: isen.density(Tstar) * isen.a(Tstar)
+        };
+    };
+    // Subsonic exit state of the nozzle
+    const exit = function (Ta) {
+        const n = nozzle(Ta);
+        if (n.flux >= n.sonicFlux) return { T: n.Tstar, u: isen.a(n.Tstar) };   // choked
+        const speed = function (T) { return Math.sqrt(Math.max(0, 2 * (n.H0 - isen.h(T)))); };
+        const Tb = shockBisect(function (T) { return n.flux - isen.density(T) * speed(T); }, n.Tstar, Ta);
+        return { T: Tb, u: speed(Tb) };
+    };
+
+    // Choking: the driver-side state at which the nozzle just reaches Mach 1.
+    // It lies between the driver state and the point where the driver flow
+    // itself would be sonic.
+    const Tsonic = shockBisect(function (T) { return isen.a(T) - isen.velocity(T4, T); }, low, T4);
+    const Tchoke = shockBisect(function (T) { const n = nozzle(T); return n.sonicFlux - n.flux; }, Tsonic, T4);
+    const choked = nozzle(Tchoke);
+    const aStar = isen.a(choked.Tstar);
+    const maxVelocity = aStar + isen.velocity(choked.Tstar, 0);
+
+    if (!(u < maxVelocity)) return { temperature: null, maxVelocity: maxVelocity };
+    if (u <= aStar) {
+        // Subsonic throughout: the nozzle exit is already the final state
+        const Ta = shockBisect(function (T) { return u - exit(T).u; }, Tchoke, T4);
+        return { temperature: exit(Ta).T, maxVelocity: maxVelocity };
+    }
+    // Choked: expand further from the sonic state to the required velocity
+    const T3 = shockBisect(function (T) { return isen.velocity(choked.Tstar, T) - (u - aStar); }, low, choked.Tstar);
+    return { temperature: T3, maxVelocity: maxVelocity };
 }
 
 /**
@@ -134,9 +218,9 @@ function thermallyPerfectModel(th) {
 
     // The expansion is integrated in sqrt(T), where the integrand of
     // u = integral of cp/a dT is smooth all the way down to T = 0.
-    const expansionVelocity = function (T4, T3) {
+    const expansionVelocity = function (T4, T3, panels) {
         const lo = Math.sqrt(Math.max(T3, 0)), hi = Math.sqrt(T4);
-        const n = 200, dx = (hi - lo) / n;
+        const n = panels || 200, dx = (hi - lo) / n;
         const f = function (x) {
             const T = Math.max(x * x, 1e-12);
             return 2 * th.cp(T) / Math.sqrt(th.gamma(T) * R);
@@ -170,10 +254,29 @@ function thermallyPerfectModel(th) {
             const d = downstream(eps);
             return { state: state(d.p, d.T, 0), speed: s2.u * eps / (1 - eps) };
         },
-        maxExpansionVelocity: function (T4) {
+        maxExpansionVelocity: function (T4, areaRatio) {
+            if (areaRatio > 1) return areaChangeExpansion(this.isentrope(T4), T4, Infinity, areaRatio).maxVelocity;
             return expansionVelocity(T4, 0);
         },
-        expansionSourcePressure: function (T4, u, p) {
+        isentrope: function (T4) {
+            const s4 = th.s0(T4);
+            const pressureRatio = function (T) { return Math.exp((th.s0(T) - s4) / R); };
+            return {
+                a: th.a,
+                h: th.h,
+                density: function (T) { return pressureRatio(T) * T4 / T; },
+                pressureRatio: pressureRatio,
+                velocity: function (Ta, Tb) { return expansionVelocity(Ta, Tb, 40); }
+            };
+        },
+        expansionSourcePressure: function (T4, u, p, areaRatio) {
+            if (areaRatio > 1) {
+                const isen = this.isentrope(T4);
+                const T3 = areaChangeExpansion(isen, T4, u, areaRatio).temperature;
+                if (T3 === null) return null;
+                const p4 = p / isen.pressureRatio(T3);
+                return isFinite(p4) ? p4 : null;
+            }
             if (!(u < expansionVelocity(T4, 0))) return null;
             const T3 = shockBisect(function (T) { return expansionVelocity(T4, T) - u; }, 0, T4);
             // Isentropic: s0(T) - R ln(p) is constant
@@ -198,18 +301,18 @@ function shockGasModel(gas, variableGamma) {
  * Largest shock Mach number a driver can produce (infinite driver pressure):
  * the expansion can only accelerate driver gas to a finite speed.
  */
-function maxMachFromModels(drivenModel, driverModel, s1, t4) {
-    const uMax = driverModel.maxExpansionVelocity(t4);
+function maxMachFromModels(drivenModel, driverModel, s1, t4, areaRatio) {
+    const uMax = driverModel.maxExpansionVelocity(t4, areaRatio);
     const excess = function (m) { return drivenModel.incidentShock(s1, m).u - uMax; };
     let hi = 2;
     while (excess(hi) < 0 && hi < 1e4) hi *= 2;
     return shockBisect(excess, 1 + 1e-9, hi);
 }
 
-function maxMachForDriver(driven, driver, t1, t4, variableGamma) {
+function maxMachForDriver(driven, driver, t1, t4, variableGamma, areaRatio) {
     const drivenModel = shockGasModel(driven, variableGamma);
     // The limit does not depend on the driven pressure
-    return maxMachFromModels(drivenModel, shockGasModel(driver, variableGamma), drivenModel.state(SHOCK_ATM, t1), t4);
+    return maxMachFromModels(drivenModel, shockGasModel(driver, variableGamma), drivenModel.state(SHOCK_ATM, t1), t4, areaRatio);
 }
 
 /**
@@ -222,7 +325,10 @@ function maxMachForDriver(driven, driver, t1, t4, variableGamma) {
  * @param {number} input.t4 - driver temperature, K
  * @param {{gamma:number, mw:number, pinf?:number, thermo?:Array}} input.driven
  * @param {{gamma:number, mw:number, pinf?:number, thermo?:Array}} input.driver
- * @param {number} [input.areaFactor=1] - empirical area-contraction factor
+ * @param {number} [input.areaRatio=1] - driver cross-section / driven
+ *   cross-section at the diaphragm (>= 1)
+ * @param {number} [input.areaFactor=1] - empirical factor dividing the legacy
+ *   gauge-pressure estimate
  * @param {function} [input.formatTemperature] - formats a temperature in K
  *   for warning messages (default: kelvin)
  * @param {boolean} [input.variableGamma=false] - use temperature-dependent
@@ -244,6 +350,10 @@ function computeShockTube(input) {
     shockRequirePositive(t1, 't1', 'Driven temperature');
     shockRequirePositive(t4, 't4', 'Driver temperature');
     shockRequirePositive(areaFactor, 'areaFactor', 'Area factor');
+    const areaRatio = input.areaRatio === undefined ? 1 : input.areaRatio;
+    if (typeof areaRatio !== 'number' || !isFinite(areaRatio) || areaRatio < 1) {
+        throw new ShockInputError('areaRatio', 'Area ratio must be 1 or greater (driver at least as wide as the driven section).');
+    }
     shockValidateGas(input.driven, 'driven', 'driven gas');
     shockValidateGas(input.driver, 'driver', 'driver gas');
 
@@ -257,7 +367,7 @@ function computeShockTube(input) {
     const wr = reflected.speed;
 
     // State 4: isentropic expansion of the driver from rest to (u2, p2)
-    const p4 = driver.expansionSourcePressure(t4, s2.u, s2.p);
+    const p4 = driver.expansionSourcePressure(t4, s2.u, s2.p, areaRatio);
     const s4 = driver.state(p4 === null ? p1 : p4, t4);
     const warnings = [];
     let p4psig = null;
@@ -268,7 +378,7 @@ function computeShockTube(input) {
         warnings.push({
             code: 'unreachable',
             message: 'Mach ' + m + ' is unreachable with this driver (limit Mach ' +
-                maxMachFromModels(driven, driver, s1, t4).toFixed(2) +
+                maxMachFromModels(driven, driver, s1, t4, areaRatio).toFixed(2) +
                 '). Use a lighter or hotter driver gas. Other states are still valid.'
         });
     } else {
@@ -277,7 +387,7 @@ function computeShockTube(input) {
             warnings.push({
                 code: 'extreme-driver-pressure',
                 message: 'Driver pressure is impractically high (driver limit is Mach ' +
-                    maxMachFromModels(driven, driver, s1, t4).toFixed(2) + '). Use a lighter or hotter driver gas.'
+                    maxMachFromModels(driven, driver, s1, t4, areaRatio).toFixed(2) + '). Use a lighter or hotter driver gas.'
             });
         }
     }
@@ -312,6 +422,7 @@ function computeShockTube(input) {
         reflectedMach: (wr + s2.u) / s2.a,
         driverPressurePsig: p4psig,
         areaFactor: areaFactor,
+        areaRatio: areaRatio,
         reachable: p4 !== null,
         warnings: warnings
     };
@@ -334,12 +445,13 @@ function machFromDriverPressure(input) {
         throw new ShockInputError('p4', 'Driver pressure must exceed the driven pressure to produce a shock.');
     }
 
-    const mMax = maxMachForDriver(input.driven, input.driver, input.t1, input.t4, input.variableGamma);
+    const mMax = maxMachForDriver(input.driven, input.driver, input.t1, input.t4, input.variableGamma, input.areaRatio);
     // p4(M) increases monotonically from p1 at M = 1 to infinity at mMax
     return shockBisect(function (m) {
         const p4 = computeShockTube({
             mach: m, p1: input.p1, t1: input.t1, t4: input.t4,
-            driven: input.driven, driver: input.driver, variableGamma: input.variableGamma
+            driven: input.driven, driver: input.driver, variableGamma: input.variableGamma,
+            areaRatio: input.areaRatio
         }).state4.p;
         return p4 === null ? 1 : p4 - input.p4;
     }, 1 + 1e-12, mMax);

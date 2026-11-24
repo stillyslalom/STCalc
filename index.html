@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@400;600;700&display=swap" rel="stylesheet">
-<link href="css/app.css?v=4" rel="stylesheet">
+<link href="css/app.css?v=5" rel="stylesheet">
 </head>
 <body>
 
@@ -78,7 +78,11 @@
     </select>
     <span class="unit"></span>
 
-    <label for="areafact" title="Divides the gauge driver pressure estimate. Use 1 for a constant-area tube.">Area contraction factor</label>
+    <label for="arearatio" title="Driver cross-section divided by driven cross-section at the diaphragm. 1 is a constant-area tube; larger drivers need less pressure.">Driver/driven area ratio</label>
+    <input id="arearatio" type="number" step="any" min="1" value="1" inputmode="decimal">
+    <span class="unit"></span>
+
+    <label for="areafact" title="Empirical factor from the original calculator: divides the gauge value shown as approximate driver pressure. It does not affect the results table.">Empirical area factor</label>
     <input id="areafact" type="number" step="any" min="0" value="1.35" inputmode="decimal">
     <span class="unit"></span>
   </div>
@@ -145,7 +149,7 @@
     <label for="wshocked">Incident shock speed</label><output id="wshocked"></output><span class="unit">m/s</span>
     <label for="wreflect" title="Lab frame">Reflected shock speed</label><output id="wreflect"></output><span class="unit">m/s</span>
     <label for="mreflect">Reflected shock Mach number</label><output id="mreflect"></output><span class="unit"></span>
-    <label for="pfourpsig" title="Gauge pressure divided by the area contraction factor">Approximate driver pressure</label><output id="pfourpsig"></output><span class="unit" data-unit="gauge"></span>
+    <label for="pfourpsig" title="Gauge driver pressure divided by the empirical area factor">Approximate driver pressure</label><output id="pfourpsig"></output><span class="unit" data-unit="gauge"></span>
     <label for="outmw" id="outmwLabel">Driven gas molecular weight</label><output id="outmw"></output><span class="unit">g/mol</span>
   </div>
   <button type="button" class="secondary small" id="showEquationsBtn">View equations</button>
@@ -471,20 +475,20 @@ Submit issues &amp; feature requests on
 </div>
 
 <!-- Bump ?v= on every file when releasing, so browsers never mix cached and new scripts -->
-<script src="js/nasa9-data.js?v=4"></script>
-<script src="js/thermo.js?v=4"></script>
-<script src="js/gas-data.js?v=4"></script>
-<script src="js/shock-calc.js?v=4"></script>
-<script src="js/riemann-solver.js?v=4"></script>
-<script src="js/rmi-growth.js?v=4"></script>
-<script src="js/time-integrators.js?v=4"></script>
-<script src="js/euler-solver.js?v=4"></script>
-<script src="js/xt-visualization.js?v=4"></script>
-<script src="js/ui-common.js?v=4"></script>
-<script src="js/app-main.js?v=4"></script>
-<script src="js/app-rmi.js?v=4"></script>
-<script src="js/app-xt.js?v=4"></script>
-<script src="js/xt-export.js?v=4"></script>
+<script src="js/nasa9-data.js?v=5"></script>
+<script src="js/thermo.js?v=5"></script>
+<script src="js/gas-data.js?v=5"></script>
+<script src="js/shock-calc.js?v=5"></script>
+<script src="js/riemann-solver.js?v=5"></script>
+<script src="js/rmi-growth.js?v=5"></script>
+<script src="js/time-integrators.js?v=5"></script>
+<script src="js/euler-solver.js?v=5"></script>
+<script src="js/xt-visualization.js?v=5"></script>
+<script src="js/ui-common.js?v=5"></script>
+<script src="js/app-main.js?v=5"></script>
+<script src="js/app-rmi.js?v=5"></script>
+<script src="js/app-xt.js?v=5"></script>
+<script src="js/xt-export.js?v=5"></script>
 
 </body>
 </html>

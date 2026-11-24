@@ -487,7 +487,11 @@ document.addEventListener('DOMContentLoaded', function () {
     if (byId('xt').open) initialize();
 
     byId('xtImportBtn').addEventListener('click', function () {
-        if (importShockIntoXT()) showXTMessage('');
+        if (!importShockIntoXT()) return;
+        // The x-t solver has a constant cross-section
+        showXTMessage(appState.shock.areaRatio > 1
+            ? 'The x-t solver ignores the area ratio, so this driver pressure gives a weaker shock here.' : '',
+            'warning');
     });
     byId('xtAddSlabBtn').addEventListener('click', function () {
         syncXTSlabGases();

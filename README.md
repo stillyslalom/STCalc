@@ -6,7 +6,7 @@ Hosted at [https://stillyslalom.github.io/STCalc](https://stillyslalom.github.io
 
 ## What it does
 
-- **Shock tube**: incident and reflected shock states and the driver pressure for a desired Mach number, or the Mach number produced by a given driver pressure. Unreachable Mach numbers and results outside the constant-γ range produce warnings.
+- **Shock tube**: incident and reflected shock states and the driver pressure for a desired Mach number, or the Mach number produced by a given driver pressure. A driver-to-driven area ratio at the diaphragm is supported. Unreachable Mach numbers and results outside the constant-γ range produce warnings.
 - **Gas models**: constant γ (matches the original calculator) or temperature-dependent specific heats from NASA polynomial fits, with frozen composition, in both the shock tube calculator and the x-t solver.
 - **Units**: pressure in Pa, kPa, MPa, bar, atm, psi or Torr and temperature in K, °C or °F, remembered by the browser.
 - **More gases, liquids and mixtures**: search about 1000 gases in the NASA CEA database and add them with one click, define your own, mix gases by mole fraction, and model liquids such as water with the stiffened-gas equation of state. Available in every gas list.
