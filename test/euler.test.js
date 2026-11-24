@@ -201,3 +201,87 @@ test('sharp interface method refuses variable-gamma slabs', () => {
     const solver = new lib.EulerSolver({ nx: 50, interfaceMethod: 'sharp' });
     assert.throws(() => solver.initialize([tslab(AIR, comp('1'), 1e5, 300, 1), slab(AIR, 1e5, 300, 1)]), /Mixed-Cell/);
 });
+
+/* ---- Second-order (MUSCL) reconstruction ---- */
+
+/** Number of cells across which density goes from 10% to 90% of a jump. */
+function contactWidth(solver, rhoA, rhoB, x0, x1) {
+    let cells = 0;
+    for (let i = 0; i < solver.nx; i++) {
+        const f = (solver.rho[i] - rhoA) / (rhoB - rhoA);
+        if (solver.x[i] > x0 && solver.x[i] < x1 && f > 0.1 && f < 0.9) cells++;
+    }
+    return cells;
+}
+
+test('second order sharpens the contact and reduces the error', () => {
+    const exact = lib.solveExactRiemann({ ...HELIUM, p: 4e5, T: 300, u: 0 }, { ...AIR, p: 101325, T: 300, u: 0 });
+    const tEnd = 0.002, xContact = 3 + exact.uStar * tEnd;
+    const slabs = [slab(HELIUM, 4e5, 300, 3), slab(AIR, 101325, 300, 3)];
+    const first = run(slabs, { finalTime: tEnd, order: 1 });
+    const second = run(slabs, { finalTime: tEnd, order: 2 });
+
+    const width = s => contactWidth(s, exact.leftPost.rho, exact.rightPost.rho, xContact - 0.5, xContact + 0.3);
+    assert.ok(width(second) <= 0.6 * width(first), `contact ${width(second)} vs ${width(first)} cells`);
+
+    const i = Math.floor((xContact + 0.15) / second.dx);
+    const error = s => Math.abs(s.u[i] / exact.uStar - 1);
+    assert.ok(error(second) < 0.25 * error(first), `u* error ${error(second)} vs ${error(first)}`);
+    close(second.p[i], exact.pStar, 1e-3, 'p*');
+    close(second.tracers[0].x, xContact, 1e-3, 'contact position');
+    close(totalMass(second), totalMass(first), 1e-10, 'mass');
+
+    // No overshoot at the shock or the contact
+    for (let k = 0; k < second.nx; k++) {
+        assert.ok(second.p[k] <= 4e5 * (1 + 1e-9) && second.p[k] >= 101325 * (1 - 1e-9), `p[${k}] = ${second.p[k]}`);
+    }
+});
+
+for (const variable of [false, true]) {
+    test(`second order keeps a moving air/water interface uniform (${variable ? 'variable' : 'constant'} gamma)`, () => {
+        const u0 = 50, p0 = 101325;
+        const solver = run([tslab(AIR, variable ? comp('1') : null, p0, 293.15, 1.0025, u0), slab(WATER, p0, 293.15, 4.9975, u0)],
+            { finalTime: 0.0005, nx: 600, order: 2 });
+        for (let i = 0; i < solver.nx; i++) {
+            if (solver.x[i] < 1.0 || solver.x[i] > 1.3) continue;
+            assert.ok(Math.abs(solver.p[i] - p0) < 1e-7 * p0, `p[${i}] = ${solver.p[i]}`);
+            assert.ok(Math.abs(solver.u[i] - u0) < 1e-7 * u0, `u[${i}] = ${solver.u[i]}`);
+        }
+    });
+}
+
+test('second order: air shock reflecting from water', () => {
+    const shock = lib.computeShockTube({ mach: 2, p1: 101325, t1: 293.15, t4: 293.15, driven: AIR, driver: HELIUM });
+    const exact = lib.solveShockedInterface(
+        { ...AIR, p: shock.state2.p, T: shock.state2.T, u: shock.state2.u },
+        { ...WATER, p: 101325, T: 293.15, u: 0 });
+    const solver = run([
+        slab(AIR, shock.state2.p, shock.state2.T, 1, shock.state2.u),
+        slab(AIR, 101325, 293.15, 0.5),
+        slab(WATER, 101325, 293.15, 1.5)
+    ], { finalTime: 0.5 / shock.shockSpeed + 0.0004, nx: 600, order: 2 });
+    close(mean(solver, 'p', 1.44, 1.48), exact.interfacePressure, 0.01, 'air side pressure');
+    close(mean(solver, 'p', 1.6, 1.9), exact.interfacePressure, 0.01, 'water side pressure');
+    for (let i = 0; i < solver.nx; i++) assert.ok(isFinite(solver.p[i]) && solver.rho[i] > 0);
+});
+
+test('second order with variable gamma matches the 0D calculation across the shocked region', () => {
+    const air = { ...AIR, thermo: comp('1') }, he = { ...HELIUM, thermo: comp('4') };
+    const shock = lib.computeShockTube({ mach: 4, p1: 10000, t1: 300, t4: 300, driven: air, driver: he, variableGamma: true });
+    const tEnd = 0.0012;
+    const solver = run([tslab(HELIUM, he.thermo, shock.state4.p, 300, 3), tslab(AIR, air.thermo, 10000, 300, 3)],
+        { finalTime: tEnd, nx: 800, order: 2 });
+    // The middle of the shocked region, which first order contaminates with helium
+    const xShock = 3 + shock.shockSpeed * tEnd, xContact = 3 + shock.state2.u * tEnd;
+    const a = xContact + 0.4 * (xShock - xContact), b = xContact + 0.8 * (xShock - xContact);
+    close(mean(solver, 'T', a, b), shock.state2.T, 0.005, 'T2');
+    close(mean(solver, 'p', a, b), shock.state2.p, 0.005, 'p2');
+    close(mean(solver, 'rho', a, b), shock.state2.rho, 0.005, 'rho2');
+});
+
+test('second order works with the sharp interface method', () => {
+    const solver = run([slab(HELIUM, 4e5, 300, 3), slab(AIR, 101325, 300, 3)],
+        { finalTime: 0.002, order: 2, interfaceMethod: 'sharp' });
+    const exact = lib.solveExactRiemann({ ...HELIUM, p: 4e5, T: 300, u: 0 }, { ...AIR, p: 101325, T: 300, u: 0 });
+    close(mean(solver, 'p', 3.6, 3.9), exact.pStar, 0.03, 'p*');
+});

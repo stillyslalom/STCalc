@@ -12,6 +12,10 @@ class EulerSolver {
         // Interface tracking method: 'sharp' or 'mixed'
         this.interfaceMethod = config.interfaceMethod || 'sharp';
 
+        // Spatial order: 1 (piecewise constant) or 2 (MUSCL: limited linear
+        // reconstruction of primitive variables)
+        this.order = config.order === 2 ? 2 : 1;
+
         // Create time integrator instance
         this.integrator = IntegratorFactory.create(config.integrator || 'RK2');
 
@@ -125,6 +129,19 @@ class EulerSolver {
         this.Un = new Float64Array(n);
         this.Uk = new Float64Array(n);
         this.flux = new Float64Array((this.nx + 1) * this.nvar);
+        if (this.order === 2) {
+            // Primitive variables per cell and their limited slopes:
+            // [rho, u, p, alpha_0.., rho_0..] (phasic densities only when tabulated)
+            this.nprim = 3 + this.numMaterials * (this.tabulated ? 2 : 1);
+            this.W = new Float64Array(this.nx * this.nprim);
+            this.dW = new Float64Array(this.nx * this.nprim);
+            const face = () => ({
+                rho: 0, mom: 0, E: 0, p: 0, rc2: 0,
+                alpha: new Float64Array(this.numMaterials), mass: new Float64Array(this.numMaterials)
+            });
+            this.faceL = face();
+            this.faceR = face();
+        }
         if (mixed) {
             this.materialFractions = new Float64Array(this.nx * this.numMaterials);
         }
@@ -474,6 +491,7 @@ class EulerSolver {
      * non-conservative part of the advection is added in updateConservative.
      */
     computeFluxes() {
+        if (this.order === 2) return this.computeFluxesMUSCL();
         const U = this.U;
         const nx = this.nx;
         const nvar = this.nvar;
@@ -545,6 +563,175 @@ class EulerSolver {
             if (waveSpeed > maxWaveSpeed) maxWaveSpeed = waveSpeed;
         }
 
+        return maxWaveSpeed;
+    }
+
+    /**
+     * Pressure and rho*a^2 of every cell for constant-gamma and stiffened
+     * materials: rho*a^2 = gamma*(p + pinf) = (p*(G+1) + P)/G.
+     */
+    closeLinear(U) {
+        const nvar = this.nvar, tiny = 1e-10;
+        const G = this.eosG, P = this.eosP, p = this.pc, rc2 = this.rc2;
+        for (let i = 0; i < this.nx; i++) {
+            const c = i * nvar;
+            const rho = Math.max(U[c], tiny);
+            const u = U[c + 1] / rho;
+            p[i] = (U[c + 2] - 0.5 * rho * u * u - P[i]) / G[i];
+            rc2[i] = (p[i] * (G[i] + 1) + P[i]) / G[i];
+            if (!(rc2[i] > tiny)) {
+                rc2[i] = tiny;
+                p[i] = (tiny * G[i] - P[i]) / (G[i] + 1);
+            }
+        }
+    }
+
+    /**
+     * State at one face of a cell from its primitive variables and slopes
+     * (side = +1 for the right face, -1 for the left face, 0 for the cell
+     * average). Density, velocity, pressure and volume fractions are
+     * reconstructed and the energy is rebuilt from them, so a uniform pressure
+     * and velocity stay uniform across material interfaces.
+     */
+    faceState(out, cell, side, mirror) {
+        const np = this.nprim, M = this.numMaterials, tiny = 1e-10;
+        const W = this.W, dW = this.dW, mats = this.materialProperties;
+        const w = cell * np, h = 0.5 * side;
+        const u = (W[w + 1] + h * dW[w + 1]) * (mirror ? -1 : 1);
+        const p = W[w + 2] + h * dW[w + 2];
+        let rho = W[w] + h * dW[w];
+        let G, P, internal;
+
+        if (M === 0) {
+            // Sharp method: the cell's own equation of state
+            G = this.eosG[cell];
+            P = this.eosP[cell];
+            internal = G * p + P;
+        } else {
+            let total = 0;
+            for (let m = 0; m < M; m++) {
+                out.alpha[m] = Math.min(1, Math.max(0, W[w + 3 + m] + h * dW[w + 3 + m]));
+                total += out.alpha[m];
+            }
+            for (let m = 0; m < M; m++) out.alpha[m] /= total;
+
+            G = 0; P = 0; internal = 0;
+            if (this.tabulated) {
+                rho = 0;
+                let present = 0;
+                for (let m = 0; m < M; m++) {
+                    const alpha = out.alpha[m], mat = mats[m];
+                    const rhoK = W[w + 3 + M + m] + h * dW[w + 3 + M + m];
+                    if (!(rhoK > 0) || !(alpha > 1e-12)) {
+                        // Trace material: carry the cell's partial density unchanged
+                        out.mass[m] = this.U[cell * this.nvar + 3 + M + m];
+                        rho += out.mass[m];
+                        continue;
+                    }
+                    out.mass[m] = alpha * rhoK;
+                    rho += out.mass[m];
+                    present += alpha;
+                    if (mat.table) {
+                        const T = p / (rhoK * mat.R);
+                        internal += out.mass[m] * EulerSolver.tableEnergy(mat.table, T);
+                        G += alpha * EulerSolver.tableCv(mat.table, T) / mat.R;
+                    } else {
+                        internal += alpha * (mat.G * p + mat.P);
+                        G += alpha * mat.G;
+                        P += alpha * mat.P;
+                    }
+                }
+                out.rc2 = (p * (G + present) + P) / G;
+            } else {
+                for (let m = 0; m < M; m++) {
+                    G += out.alpha[m] * mats[m].G;
+                    P += out.alpha[m] * mats[m].P;
+                }
+                internal = G * p + P;
+            }
+        }
+
+        if (!this.tabulated) out.rc2 = (p * (G + 1) + P) / G;
+        if (!(out.rc2 > tiny)) out.rc2 = tiny;
+        rho = Math.max(rho, tiny);
+        out.rho = rho;
+        out.mom = rho * u;
+        out.p = p;
+        out.E = internal + 0.5 * rho * u * u;
+        return out;
+    }
+
+    /**
+     * Second-order fluxes: limited linear reconstruction of the primitive
+     * variables in each cell, then the HLLC flux between the two face states.
+     */
+    computeFluxesMUSCL() {
+        const U = this.U, nx = this.nx, nvar = this.nvar, np = this.nprim;
+        const M = this.numMaterials, W = this.W, dW = this.dW;
+        const tiny = 1e-10;
+
+        if (this.interfaceMethod === 'mixed') this.updateEOS(U);
+        if (!this.tabulated) this.closeLinear(U);
+
+        // Primitive variables
+        for (let i = 0; i < nx; i++) {
+            const c = i * nvar, w = i * np;
+            const rho = Math.max(U[c], tiny);
+            W[w] = rho;
+            W[w + 1] = U[c + 1] / rho;
+            W[w + 2] = this.pc[i];
+            for (let m = 0; m < M; m++) {
+                const alpha = U[c + 3 + m];
+                W[w + 3 + m] = alpha;
+                // Phasic density; zero marks a material that is absent from the cell
+                if (this.tabulated) W[w + 3 + M + m] = alpha > 1e-12 ? U[c + 3 + M + m] / alpha : 0;
+            }
+        }
+
+        // Limited slopes: minmod, which never creates new extrema. Cells next
+        // to a wall, and phasic densities next to a cell without that
+        // material, stay piecewise constant.
+        dW.fill(0);
+        const firstPhasic = this.tabulated ? 3 + M : np;
+        for (let i = 1; i < nx - 1; i++) {
+            const w = i * np;
+            for (let k = 0; k < np; k++) {
+                const here = W[w + k], left = W[w - np + k], right = W[w + np + k];
+                if (k >= firstPhasic && !(here > 0 && left > 0 && right > 0)) continue;
+                const a = here - left, b = right - here;
+                if (a * b > 0) dW[w + k] = Math.abs(a) < Math.abs(b) ? a : b;
+            }
+        }
+
+        const L = this.faceL, R = this.faceR;
+        let maxWaveSpeed = 0;
+        for (let i = 0; i <= nx; i++) {
+            const f = i * nvar;
+            if (i === 0) {
+                this.faceState(R, 0, -1, false);
+                this.faceState(L, 0, -1, true);       // mirror image behind the wall
+            } else if (i === nx) {
+                this.faceState(L, nx - 1, 1, false);
+                this.faceState(R, nx - 1, 1, true);
+            } else {
+                this.faceState(L, i - 1, 1, false);
+                this.faceState(R, i, -1, false);
+            }
+
+            const waveSpeed = this.hllcFlux(L.rho, L.mom, L.E, L.p, L.rc2, R.rho, R.mom, R.E, R.p, R.rc2, f);
+            const uFace = this._uFace;
+            this.faceVelocity[i] = uFace;
+
+            if (M > 0) {
+                const up = this._upwind === 0 ? L : R;
+                for (let m = 0; m < M; m++) this.flux[f + 3 + m] = up.alpha[m] * uFace;
+                if (this.tabulated) {
+                    const massFlux = this.flux[f];
+                    for (let m = 0; m < M; m++) this.flux[f + 3 + M + m] = massFlux * up.mass[m] / up.rho;
+                }
+            }
+            if (waveSpeed > maxWaveSpeed) maxWaveSpeed = waveSpeed;
+        }
         return maxWaveSpeed;
     }
 

@@ -181,6 +181,7 @@ function readXTConfiguration() {
         finalTime: readNumber(byId('xtSimTime'), 'Simulated time', { positive: true }) / 1000,
         xtInterval: readNumber(byId('xtSnapshotInterval'), 'Snapshot interval', { positive: true }) / 1000,
         cfl: readNumber(byId('xtCflNumber'), 'CFL number', { min: 0.05, max: 0.9 }),
+        order: Number(byId('xtOrder').value),
         integrator: byId('xtIntegrator').value,
         interfaceMethod: byId('xtInterfaceMethod').value
     };

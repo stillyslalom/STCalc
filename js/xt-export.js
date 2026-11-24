@@ -120,6 +120,7 @@ async function exportXTDataHDF5() {
         f.get('metadata').create_dataset({name: 'integrator', data: [xtRunConfig.integrator]});
         f.get('metadata').create_dataset({name: 'interface_method', data: [xtResults.interfaceMethod]});
         f.get('metadata').create_dataset({name: 'gas_model', data: [xtRunConfig.gasModel]});
+        f.get('metadata').create_dataset({name: 'spatial_order', data: [xtRunConfig.order], dtype: '<i'});
         f.get('metadata').create_dataset({name: 'simulation_datetime', data: [now.toISOString()]});
         f.get('metadata').create_dataset({name: 'wall_time', data: [xtResults.wallTime || 0], dtype: '<d'});
         

@@ -12,7 +12,8 @@ A 1D multicomponent compressible Euler solver that runs in the browser and draws
 
 ## Numerical method
 
-- Finite volume on a uniform grid, first order in space, HLLC flux with Davis wave-speed estimates.
+- Finite volume on a uniform grid with the HLLC flux and Davis wave-speed estimates.
+- Second order in space by default (MUSCL): density, velocity, pressure and volume fractions are reconstructed linearly in each cell with the minmod limiter, and the energy is rebuilt from them at each face. First order is available as an option.
 - Time integration: SSP Runge–Kutta SSPRK(4,3) (default, CFL 0.8) or two-stage Runge–Kutta (CFL 0.4). Time steps are shortened to land exactly on snapshot times.
 - Reflecting walls at both ends.
 - Lagrangian tracers follow each initial interface and are drawn as white lines.
@@ -40,7 +41,7 @@ Each slab has its own equation of state, and all materials in a cell share one p
 
 - Frozen composition: no dissociation, ionization, reaction or phase change (no cavitation). With constant γ there is no vibrational excitation either.
 - Inviscid and one-dimensional: no boundary layers, diaphragm opening or area changes.
-- First-order accuracy smears shocks over a few cells and contacts over more; increase the grid cells to sharpen them.
+- Shocks are spread over two or three cells and contacts over more (about 7 cells after 200 steps at second order, twice that at first order); increase the grid cells to sharpen them.
 
 ## Output files
 

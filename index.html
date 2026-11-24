@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@400;600;700&display=swap" rel="stylesheet">
-<link href="css/app.css?v=3" rel="stylesheet">
+<link href="css/app.css?v=4" rel="stylesheet">
 </head>
 <body>
 
@@ -251,6 +251,12 @@
       <option value="nasa">Variable γ</option>
     </select>
   </label>
+  <label title="Second order (MUSCL, minmod limiter) resolves shocks and interfaces in about half as many cells; roughly twice as slow per cell.">Accuracy
+    <select id="xtOrder">
+      <option value="2" selected>2nd order</option>
+      <option value="1">1st order</option>
+    </select>
+  </label>
   <label>Integrator
     <select id="xtIntegrator">
       <option value="SSP" selected>SSP-RK3</option>
@@ -465,20 +471,20 @@ Submit issues &amp; feature requests on
 </div>
 
 <!-- Bump ?v= on every file when releasing, so browsers never mix cached and new scripts -->
-<script src="js/nasa9-data.js?v=3"></script>
-<script src="js/thermo.js?v=3"></script>
-<script src="js/gas-data.js?v=3"></script>
-<script src="js/shock-calc.js?v=3"></script>
-<script src="js/riemann-solver.js?v=3"></script>
-<script src="js/rmi-growth.js?v=3"></script>
-<script src="js/time-integrators.js?v=3"></script>
-<script src="js/euler-solver.js?v=3"></script>
-<script src="js/xt-visualization.js?v=3"></script>
-<script src="js/ui-common.js?v=3"></script>
-<script src="js/app-main.js?v=3"></script>
-<script src="js/app-rmi.js?v=3"></script>
-<script src="js/app-xt.js?v=3"></script>
-<script src="js/xt-export.js?v=3"></script>
+<script src="js/nasa9-data.js?v=4"></script>
+<script src="js/thermo.js?v=4"></script>
+<script src="js/gas-data.js?v=4"></script>
+<script src="js/shock-calc.js?v=4"></script>
+<script src="js/riemann-solver.js?v=4"></script>
+<script src="js/rmi-growth.js?v=4"></script>
+<script src="js/time-integrators.js?v=4"></script>
+<script src="js/euler-solver.js?v=4"></script>
+<script src="js/xt-visualization.js?v=4"></script>
+<script src="js/ui-common.js?v=4"></script>
+<script src="js/app-main.js?v=4"></script>
+<script src="js/app-rmi.js?v=4"></script>
+<script src="js/app-xt.js?v=4"></script>
+<script src="js/xt-export.js?v=4"></script>
 
 </body>
 </html>
