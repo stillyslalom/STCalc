@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@400;600;700&display=swap" rel="stylesheet">
-<link href="css/app.css?v=7" rel="stylesheet">
+<link href="css/app.css?v=8" rel="stylesheet">
 </head>
 <body>
 
@@ -150,6 +150,8 @@
     <label for="wreflect" title="Lab frame">Reflected shock speed</label><output id="wreflect"></output><span class="unit">m/s</span>
     <label for="mreflect">Reflected shock Mach number</label><output id="mreflect"></output><span class="unit"></span>
     <label for="pfourpsig" title="Gauge driver pressure divided by the empirical area factor">Approximate driver pressure</label><output id="pfourpsig"></output><span class="unit" data-unit="gauge"></span>
+    <label for="outtailor" title="Pressure the expanded driver gas reaches when the reflected shock stops it, divided by the reshocked pressure. 1 is a tailored interface; above 1 a shock returns to the end wall, below 1 an expansion does.">Tailoring ratio</label><output id="outtailor"></output><span class="unit"></span>
+    <label for="outtailormach" title="Incident Mach number at which the interface is tailored for these gases and temperatures">Tailored Mach number</label><output id="outtailormach"></output><span class="unit"></span>
     <label for="outmw" id="outmwLabel">Driven gas molecular weight</label><output id="outmw"></output><span class="unit">g/mol</span>
   </div>
   <button type="button" class="secondary small" id="showEquationsBtn">View equations</button>
@@ -476,20 +478,21 @@ Submit issues &amp; feature requests on
 </div>
 
 <!-- Bump ?v= on every file when releasing, so browsers never mix cached and new scripts -->
-<script src="js/nasa9-data.js?v=7"></script>
-<script src="js/thermo.js?v=7"></script>
-<script src="js/gas-data.js?v=7"></script>
-<script src="js/shock-calc.js?v=7"></script>
-<script src="js/riemann-solver.js?v=7"></script>
-<script src="js/rmi-growth.js?v=7"></script>
-<script src="js/time-integrators.js?v=7"></script>
-<script src="js/euler-solver.js?v=7"></script>
-<script src="js/xt-visualization.js?v=7"></script>
-<script src="js/ui-common.js?v=7"></script>
-<script src="js/app-main.js?v=7"></script>
-<script src="js/app-rmi.js?v=7"></script>
-<script src="js/app-xt.js?v=7"></script>
-<script src="js/xt-export.js?v=7"></script>
+<script src="js/nasa9-data.js?v=8"></script>
+<script src="js/thermo.js?v=8"></script>
+<script src="js/gas-data.js?v=8"></script>
+<script src="js/shock-calc.js?v=8"></script>
+<script src="js/riemann-solver.js?v=8"></script>
+<script src="js/rmi-growth.js?v=8"></script>
+<script src="js/time-integrators.js?v=8"></script>
+<script src="js/euler-solver.js?v=8"></script>
+<script src="js/xt-analysis.js?v=8"></script>
+<script src="js/xt-visualization.js?v=8"></script>
+<script src="js/ui-common.js?v=8"></script>
+<script src="js/app-main.js?v=8"></script>
+<script src="js/app-rmi.js?v=8"></script>
+<script src="js/app-xt.js?v=8"></script>
+<script src="js/xt-export.js?v=8"></script>
 
 </body>
 </html>

@@ -91,6 +91,16 @@ function constantGammaModel(gas) {
             const p4 = (p + pinf) * Math.pow(arg, -2 * g / gm) - pinf;
             return isFinite(p4) ? p4 : null;
         },
+        /** Pressure behind the shock that brings the moving state s to rest. */
+        stagnationShockPressure: function (s) {
+            const k = gp * s.u / (4 * s.a);
+            const ms = k + Math.sqrt(k * k + 1);
+            return (s.p + pinf) * (1 + 2 * g / gp * (ms * ms - 1)) - pinf;
+        },
+        /** Temperature after isentropic expansion from (p4, T4) to pressure p. */
+        isentropicTemperature: function (T4, p4, p) {
+            return T4 * Math.pow((p + pinf) / (p4 + pinf), gm / g);
+        },
         /** Property functions along the isentrope through the driver state. */
         isentrope: function (T4) {
             return {
@@ -258,6 +268,13 @@ function thermallyPerfectModel(th) {
             if (areaRatio > 1) return areaChangeExpansion(this.isentrope(T4), T4, Infinity, areaRatio).maxVelocity;
             return expansionVelocity(T4, 0);
         },
+        stagnationShockPressure: function (s) {
+            return this.reflectedShock(null, s).state.p;
+        },
+        isentropicTemperature: function (T4, p4, p) {
+            const target = th.s0(T4) + R * Math.log(p / p4);
+            return shockBisect(function (T) { return th.s0(T) - target; }, 1e-6 * T4, T4);
+        },
         isentrope: function (T4) {
             const s4 = th.s0(T4);
             const pressureRatio = function (T) { return Math.exp((th.s0(T) - s4) / R); };
@@ -333,8 +350,12 @@ function maxMachForDriver(driven, driver, t1, t4, variableGamma, areaRatio) {
  *   for warning messages (default: kelvin)
  * @param {boolean} [input.variableGamma=false] - use temperature-dependent
  *   specific heats (NASA-9 fits) for gases that have a composition
- * @returns {Object} states 1, 2, 4, 5 (each {p, T, rho, a, u, gamma}) plus
- *   wave speeds and warnings.
+ * @returns {Object} states 1, 2, 3, 4, 5 (each {p, T, rho, a, u, gamma}) plus
+ *   wave speeds and warnings. State 3 is the expanded driver gas behind the
+ *   contact surface. tailoringRatio is the pressure that gas reaches when the
+ *   reflected shock brings it to rest, divided by p5: 1 for a tailored
+ *   interface, above 1 when a shock is sent back to the end wall, below 1
+ *   when an expansion is.
  *   When the Mach number cannot be reached, driver pressure and density are
  *   null and a warning with code 'unreachable' is included; all other states
  *   are still returned.
@@ -393,6 +414,17 @@ function computeShockTube(input) {
     }
 
     const showT = input.formatTemperature || function (T) { return T.toFixed(0) + ' K'; };
+    // State 3: driver gas behind the contact surface (same pressure and
+    // velocity as state 2). Tailoring compares the pressure it reaches when
+    // the reflected shock stops it with the reshocked pressure p5.
+    let s3 = null, tailoringRatio = null;
+    if (p4 !== null) {
+        s3 = driver.state(s2.p, driver.isentropicTemperature(t4, p4, s2.p));
+        s3.u = s2.u;
+        tailoringRatio = driver.stagnationShockPressure(s3) / s5.p;
+        if (!isFinite(tailoringRatio)) tailoringRatio = null;
+    }
+
     const hottest = Math.max(s2.T, s5.T);
     if (driven.thermo) {
         if (hottest > Math.min(driven.thermo.tMax, DISSOCIATION_WARNING_K)) {
@@ -415,6 +447,8 @@ function computeShockTube(input) {
         variableGamma: !!(driven.thermo || driver.thermo),
         state1: s1,
         state2: s2,
+        state3: s3,
+        tailoringRatio: tailoringRatio,
         state4: s4,
         state5: s5,
         shockSpeed: m * s1.a,
@@ -457,9 +491,35 @@ function machFromDriverPressure(input) {
     }, 1 + 1e-12, mMax);
 }
 
+/**
+ * Incident Mach number at which the interface is tailored (tailoringRatio = 1),
+ * or null if there is none below the driver's Mach limit.
+ * @param {Object} input - as computeShockTube, without mach
+ */
+function tailoredMach(input) {
+    const mMax = maxMachForDriver(input.driven, input.driver, input.t1, input.t4, input.variableGamma, input.areaRatio);
+    const excess = function (m) {
+        const ratio = computeShockTube({ ...input, mach: m, formatTemperature: undefined }).tailoringRatio;
+        return ratio === null ? NaN : ratio - 1;
+    };
+    // The ratio is below 1 for weak shocks when tailoring is possible; look for the first crossing
+    const upper = Math.min(mMax * 0.999, 30);
+    let previous = 1.02, fPrevious = excess(previous);
+    for (let k = 1; k <= 24; k++) {
+        const m = 1.02 * Math.pow(upper / 1.02, k / 24);
+        const f = excess(m);
+        if (isFinite(f) && isFinite(fPrevious) && (f > 0) !== (fPrevious > 0)) {
+            return shockBisect(excess, previous, m);
+        }
+        previous = m;
+        fPrevious = f;
+    }
+    return null;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
-        ShockInputError, computeShockTube, machFromDriverPressure,
+        ShockInputError, computeShockTube, machFromDriverPressure, tailoredMach,
         maxMachForDriver, shockGasModel
     };
 }

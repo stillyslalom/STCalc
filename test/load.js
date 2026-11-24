@@ -12,7 +12,8 @@ const FILES = [
     'shock-calc.js',
     'riemann-solver.js',
     'time-integrators.js',
-    'euler-solver.js'
+    'euler-solver.js',
+    'xt-analysis.js'
 ];
 
 function load() {
@@ -26,9 +27,9 @@ function load() {
         RU, GAS_DATABASE, stiffenedEffectiveMw, eosDensity, eosSoundSpeed,
         mixtureProperties, validateGasDefinition, gasComposition,
         NASA9_DATA, NASA9_ALL_SPECIES, NASA_ALIASES, searchNasaSpecies, nasa9Species, makeThermo,
-        ShockInputError, computeShockTube, machFromDriverPressure, maxMachForDriver,
+        ShockInputError, computeShockTube, machFromDriverPressure, maxMachForDriver, tailoredMach,
         solveExactRiemann, solveShockedInterface,
-        EulerSolver
+        EulerSolver, steadyWindow, interfaceArrival, analyzeTestTime
     })`, context);
 }
 

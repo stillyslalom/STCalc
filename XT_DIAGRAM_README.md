@@ -8,7 +8,8 @@ A 1D multicomponent compressible Euler solver that runs in the browser and draws
 2. Edit the slabs. They are listed from the driver end wall to the driven end wall. Each has a gas, liquid or mixture, a pressure, a temperature and a length. Each also has a cross-sectional area (relative units), for a driver wider than the driven section or a contraction in the test section. Add more slabs for test-section gases, liquids or buffer layers.
 3. Optionally enter probe positions to get time histories at fixed locations, as a pressure transducer would record.
 4. Run. Choose the plotted field (pressure, density, temperature, velocity) and a linear or logarithmic color scale afterwards without re-running. Hover over the diagram to read all four values at a point. Pressure and temperature use the units chosen at the top of the page; exported files always use kPa and K.
-5. Export the image, the full x-t field, interface paths or probe traces as CSV, or everything as JSON or HDF5.
+5. Read the timing under the plots: when the shock reaches the end wall and each probe, and how long the pressure behind it stays within 5% (the test time). These come from the stored snapshots, so shorten the snapshot interval for finer resolution.
+6. Export the image, the full x-t field, interface paths or probe traces as CSV, or everything as JSON or HDF5.
 
 ## Numerical method
 

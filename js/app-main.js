@@ -24,7 +24,7 @@ const SHOCK_OUTPUT_IDS = [
     'pdriv', 'pshocked', 'pfour', 'preflect', 'tdriv', 'tshocked', 'tfour', 'treflect',
     'ddriv', 'dshocked', 'dfour', 'dreflect', 'adriv', 'ashocked', 'afour', 'areflect',
     'gdriv', 'gshocked', 'gfour', 'greflect',
-    'ushocked', 'outmach', 'wshocked', 'wreflect', 'mreflect', 'pfourpsig', 'outmw'
+    'ushocked', 'outmach', 'wshocked', 'wreflect', 'mreflect', 'pfourpsig', 'outmw', 'outtailor', 'outtailormach'
 ];
 
 function shockMode() {
@@ -74,6 +74,8 @@ function displayShockResult(result) {
     set('pfourpsig', result.driverPressurePsig === null ? '—'
         : formatQuantity('gauge', result.driverPressurePsig / PSI_PER_PA));
     set('outmw', formatSig(result.mw));
+    set('outtailor', formatSig(result.tailoringRatio, 4));
+    set('outtailormach', formatSig(result.tailoredMach, 4));
     byId('outmwLabel').title = result.pinf > 0
         ? 'Effective value for the stiffened gas; p∞ = ' + formatSig(result.pinf / 1e6, 4) + ' MPa'
         : '';
@@ -108,6 +110,7 @@ function calcShock() {
             if (mach <= 1) throw new FieldError(byId('mach'), 'Mach number must be greater than 1 for a shock wave.');
         }
         result = computeShockTube({ ...inputs, mach: mach });
+        result.tailoredMach = tailoredMach(inputs);
     } catch (error) {
         // Never leave results on screen that do not belong to the inputs
         clearShockOutputs();

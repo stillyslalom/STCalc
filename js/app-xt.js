@@ -272,8 +272,33 @@ function runXTSimulation() {
 }
 
 function displayXTStatistics(results) {
-    const stat = function (label, value) { return el('div', {}, el('dt', {}, label), el('dd', {}, value)); };
+    const stat = function (label, value, title) { return el('div', {}, el('dt', { title: title }, label), el('dd', {}, value)); };
+    const ms = function (seconds) { return formatSig(seconds * 1000, 3) + ' ms'; };
+    // A plateau that only just began when the run ended says nothing about its length
+    const steady = function (w) { return w.open && !(w.duration > 0) ? '—' : (w.open ? '≥ ' : '') + ms(w.duration); };
+    const resolution = 'Read from the stored snapshots, so resolved to the snapshot interval.';
+
+    // Test time: how long the state behind the first wave stays within 5%
+    const timing = [];
+    const analysis = analyzeTestTime(results, xtProbePositions);
+    if (analysis.endWall) {
+        timing.push(stat('End wall: shock arrives', ms(analysis.endWall.arrival), resolution));
+        timing.push(stat('End wall: test time', steady(analysis.endWall),
+            'How long the end-wall pressure stays within 5% of its value behind the reflected shock. ≥ means it lasted to the end of the run. ' + resolution));
+    }
+    analysis.probes.forEach(function (probe) {
+        if (!probe.window) return;
+        const at = 'x = ' + formatSig(probe.x, 4) + ' m: ';
+        timing.push(stat(at + 'shock arrives', ms(probe.window.arrival), resolution));
+        timing.push(stat(at + 'steady for', steady(probe.window),
+            'How long the pressure stays within 5% of its value behind the first wave. ' + resolution));
+        if (probe.interfaceArrival !== null) {
+            timing.push(stat(at + 'interface arrives', ms(probe.interfaceArrival), 'First material interface to reach this position.'));
+        }
+    });
+
     byId('xtStatsContent').replaceChildren(
+        ...timing,
         stat('Time steps', results.timeSteps.toLocaleString()),
         stat('Simulated time', (results.t * 1000).toFixed(2) + ' ms'),
         stat('Wall time', (results.wallTime || 0).toFixed(2) + ' s'),
