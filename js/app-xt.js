@@ -501,7 +501,7 @@ document.addEventListener('DOMContentLoaded', function () {
     byId('xtInterfaceMethod').addEventListener('change', updateInterfaceMethodInfo);
     byId('xtGasModel').addEventListener('change', updateInterfaceMethodInfo);
     byId('xtIntegrator').addEventListener('change', function () {
-        byId('xtCflNumber').value = byId('xtIntegrator').value === 'SSP' ? 0.8 : 0.4;
+        byId('xtCflNumber').value = byId('xtIntegrator').value === 'RK2' ? 0.4 : 0.8;
     });
     byId('xtRunBtn').addEventListener('click', runXTSimulation);
     byId('xtClearBtn').addEventListener('click', clearXTResults);

@@ -14,7 +14,7 @@ A 1D multicomponent compressible Euler solver that runs in the browser and draws
 
 - Finite volume on a uniform grid with the HLLC flux and Davis wave-speed estimates.
 - Second order in space by default (MUSCL): density, velocity, pressure and volume fractions are reconstructed linearly in each cell with the minmod limiter, and the energy is rebuilt from them at each face. First order is available as an option.
-- Time integration: SSP Runge–Kutta SSPRK(4,3) (default, CFL 0.8) or two-stage Runge–Kutta (CFL 0.4). Time steps are shortened to land exactly on snapshot times.
+- Time integration: MUSCL-Hancock by default (a half-step predictor on the reconstructed values, then one flux evaluation per step; CFL 0.8). SSP Runge–Kutta SSPRK(4,3) (CFL 0.8) and two-stage Runge–Kutta (CFL 0.4) are available and take four and two flux evaluations per step. Time steps are shortened to land exactly on snapshot times.
 - Reflecting walls at both ends.
 - Lagrangian tracers follow each initial interface and are drawn as white lines.
 
@@ -31,6 +31,8 @@ Each slab has its own equation of state, and all materials in a cell share one p
   `p∞ = 0` gives an ideal gas. The built-in water uses γ = 6.12, p∞ = 343 MPa, with R chosen to give 998.2 kg/m³ at 293.15 K and 1 atm (sound speed 1450 m/s). The temperature of a liquid is only as meaningful as that fit.
 
 - **Variable γ**: gases are ideal, `p = ρ R T`, with specific heats from NASA polynomial fits and frozen composition. The internal energy `e(T)` of each slab's gas is tabulated every 2 K. Liquids keep the stiffened-gas model. About 1.5 times slower.
+
+Primitive variables are only evaluated at snapshot times; between snapshots the solver works on the conserved variables alone.
 
 ### Interfaces
 

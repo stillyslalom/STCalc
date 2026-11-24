@@ -56,6 +56,7 @@ class EulerSolver {
         // True when any material has a tabulated (temperature-dependent)
         // equation of state; partial densities are then carried per material
         this.tabulated = false;
+        this.alphaAtHalfStep = false;
 
         // Face arrays
         this.flux = null;
@@ -121,6 +122,10 @@ class EulerSolver {
 
         this.materialProperties = materials;
         this.regions = materials;
+        // Flat copies for the inner loops
+        this.matG = Float64Array.from(materials, m => m.G);
+        this.matP = Float64Array.from(materials, m => m.P);
+        this.matR = Float64Array.from(materials, m => m.R);
         this.numMaterials = mixed ? slabs.length : 0;
         this.nvar = 3 + this.numMaterials * (this.tabulated ? 2 : 1);
 
@@ -328,11 +333,15 @@ class EulerSolver {
                     if (!(alpha > 1e-12)) continue;
                     const mat = mats[m];
                     const mass = U[idx + 3 + M + m];
-                    if (mat.table && mass > 0) {
-                        const rhoK = mass / alpha;
-                        const T = p / (rhoK * mat.R);
-                        energy += mass * EulerSolver.tableEnergy(mat.table, T);
-                        xi += alpha * EulerSolver.tableCv(mat.table, T) / mat.R;
+                    const table = mat.table;
+                    if (table && mass > 0) {
+                        // T = p / (rho_k R); tableEnergy and tableCv inlined
+                        const x = p * alpha / (mass * mat.R * table.dT);
+                        let j = x | 0;
+                        if (j > table.n - 2) j = table.n - 2; else if (j < 0) j = 0;
+                        const e0 = table.e[j], de = table.e[j + 1] - e0;
+                        energy += mass * (e0 + de * (x - j));
+                        xi += alpha * de / (table.dT * mat.R);
                     } else {
                         energy += alpha * (mat.G * p + mat.P);
                         xi += alpha * mat.G;
@@ -588,39 +597,44 @@ class EulerSolver {
 
     /**
      * State at one face of a cell from its primitive variables and slopes
-     * (side = +1 for the right face, -1 for the left face, 0 for the cell
-     * average). Density, velocity, pressure and volume fractions are
-     * reconstructed and the energy is rebuilt from them, so a uniform pressure
-     * and velocity stay uniform across material interfaces.
+     * (side = +1 for the right face, -1 for the left face). Density, velocity,
+     * pressure and volume fractions are reconstructed and the energy is
+     * rebuilt from them, so a uniform pressure and velocity stay uniform
+     * across material interfaces.
      */
     faceState(out, cell, side, mirror) {
         const np = this.nprim, M = this.numMaterials, tiny = 1e-10;
-        const W = this.W, dW = this.dW, mats = this.materialProperties;
+        const W = this.W, dW = this.dW;
         const w = cell * np, h = 0.5 * side;
-        const u = (W[w + 1] + h * dW[w + 1]) * (mirror ? -1 : 1);
+        const u = mirror ? -(W[w + 1] + h * dW[w + 1]) : W[w + 1] + h * dW[w + 1];
         const p = W[w + 2] + h * dW[w + 2];
         let rho = W[w] + h * dW[w];
-        let G, P, internal;
+        let G = 0, P = 0, internal, rc2;
 
         if (M === 0) {
             // Sharp method: the cell's own equation of state
             G = this.eosG[cell];
             P = this.eosP[cell];
             internal = G * p + P;
+            rc2 = (p * (G + 1) + P) / G;
         } else {
+            const alphaOut = out.alpha;
             let total = 0;
             for (let m = 0; m < M; m++) {
-                out.alpha[m] = Math.min(1, Math.max(0, W[w + 3 + m] + h * dW[w + 3 + m]));
-                total += out.alpha[m];
+                let alpha = W[w + 3 + m] + h * dW[w + 3 + m];
+                alpha = alpha < 0 ? 0 : (alpha > 1 ? 1 : alpha);
+                alphaOut[m] = alpha;
+                total += alpha;
             }
-            for (let m = 0; m < M; m++) out.alpha[m] /= total;
+            const scale = 1 / total;
 
-            G = 0; P = 0; internal = 0;
             if (this.tabulated) {
+                const mats = this.materialProperties;
+                internal = 0;
                 rho = 0;
                 let present = 0;
                 for (let m = 0; m < M; m++) {
-                    const alpha = out.alpha[m], mat = mats[m];
+                    const alpha = (alphaOut[m] *= scale);
                     const rhoK = W[w + 3 + M + m] + h * dW[w + 3 + M + m];
                     if (!(rhoK > 0) || !(alpha > 1e-12)) {
                         // Trace material: carry the cell's partial density unchanged
@@ -628,83 +642,139 @@ class EulerSolver {
                         rho += out.mass[m];
                         continue;
                     }
-                    out.mass[m] = alpha * rhoK;
-                    rho += out.mass[m];
+                    const mass = alpha * rhoK;
+                    out.mass[m] = mass;
+                    rho += mass;
                     present += alpha;
-                    if (mat.table) {
-                        const T = p / (rhoK * mat.R);
-                        internal += out.mass[m] * EulerSolver.tableEnergy(mat.table, T);
-                        G += alpha * EulerSolver.tableCv(mat.table, T) / mat.R;
+                    const table = mats[m].table;
+                    if (table) {
+                        // Inlined tableEnergy / tableCv
+                        const x = p / (rhoK * this.matR[m] * table.dT);
+                        let j = x | 0;
+                        if (j > table.n - 2) j = table.n - 2; else if (j < 0) j = 0;
+                        const e0 = table.e[j], de = table.e[j + 1] - e0;
+                        internal += mass * (e0 + de * (x - j));
+                        G += alpha * de / (table.dT * this.matR[m]);
                     } else {
-                        internal += alpha * (mat.G * p + mat.P);
-                        G += alpha * mat.G;
-                        P += alpha * mat.P;
+                        internal += alpha * (this.matG[m] * p + this.matP[m]);
+                        G += alpha * this.matG[m];
+                        P += alpha * this.matP[m];
                     }
                 }
-                out.rc2 = (p * (G + present) + P) / G;
+                rc2 = (p * (G + present) + P) / G;
             } else {
+                const matG = this.matG, matP = this.matP;
                 for (let m = 0; m < M; m++) {
-                    G += out.alpha[m] * mats[m].G;
-                    P += out.alpha[m] * mats[m].P;
+                    const alpha = (alphaOut[m] *= scale);
+                    G += alpha * matG[m];
+                    P += alpha * matP[m];
                 }
                 internal = G * p + P;
+                rc2 = (p * (G + 1) + P) / G;
             }
         }
 
-        if (!this.tabulated) out.rc2 = (p * (G + 1) + P) / G;
-        if (!(out.rc2 > tiny)) out.rc2 = tiny;
-        rho = Math.max(rho, tiny);
+        if (!(rho > tiny)) rho = tiny;
+        out.rc2 = rc2 > tiny ? rc2 : tiny;
         out.rho = rho;
         out.mom = rho * u;
         out.p = p;
         out.E = internal + 0.5 * rho * u * u;
-        return out;
     }
 
     /**
-     * Second-order fluxes: limited linear reconstruction of the primitive
-     * variables in each cell, then the HLLC flux between the two face states.
+     * First half of a second-order flux evaluation: equation of state,
+     * primitive variables and their limited slopes.
+     * @returns {number} largest |u| + a over the cells, for the time step
      */
-    computeFluxesMUSCL() {
+    musclPrepare() {
         const U = this.U, nx = this.nx, nvar = this.nvar, np = this.nprim;
         const M = this.numMaterials, W = this.W, dW = this.dW;
+        const pc = this.pc, rc2 = this.rc2;
+        const tabulated = this.tabulated;
         const tiny = 1e-10;
 
         if (this.interfaceMethod === 'mixed') this.updateEOS(U);
-        if (!this.tabulated) this.closeLinear(U);
+        if (!tabulated) this.closeLinear(U);
 
-        // Primitive variables
+        let maxSpeed = 0;
         for (let i = 0; i < nx; i++) {
             const c = i * nvar, w = i * np;
-            const rho = Math.max(U[c], tiny);
+            const rho = U[c] > tiny ? U[c] : tiny;
+            const u = U[c + 1] / rho;
             W[w] = rho;
-            W[w + 1] = U[c + 1] / rho;
-            W[w + 2] = this.pc[i];
+            W[w + 1] = u;
+            W[w + 2] = pc[i];
             for (let m = 0; m < M; m++) {
                 const alpha = U[c + 3 + m];
                 W[w + 3 + m] = alpha;
                 // Phasic density; zero marks a material that is absent from the cell
-                if (this.tabulated) W[w + 3 + M + m] = alpha > 1e-12 ? U[c + 3 + M + m] / alpha : 0;
+                if (tabulated) W[w + 3 + M + m] = alpha > 1e-12 ? U[c + 3 + M + m] / alpha : 0;
             }
+            const speed = (u < 0 ? -u : u) + Math.sqrt(rc2[i] / rho);
+            if (speed > maxSpeed) maxSpeed = speed;
         }
 
         // Limited slopes: minmod, which never creates new extrema. Cells next
         // to a wall, and phasic densities next to a cell without that
         // material, stay piecewise constant.
-        dW.fill(0);
-        const firstPhasic = this.tabulated ? 3 + M : np;
+        const plain = tabulated ? 3 + M : np;
+        for (let k = 0; k < np; k++) {
+            dW[k] = 0;
+            dW[(nx - 1) * np + k] = 0;
+        }
         for (let i = 1; i < nx - 1; i++) {
             const w = i * np;
-            for (let k = 0; k < np; k++) {
+            for (let k = 0; k < plain; k++) {
+                const here = W[w + k];
+                const a = here - W[w - np + k], b = W[w + np + k] - here;
+                dW[w + k] = a * b > 0 ? ((a < 0 ? -a : a) < (b < 0 ? -b : b) ? a : b) : 0;
+            }
+            for (let k = plain; k < np; k++) {
                 const here = W[w + k], left = W[w - np + k], right = W[w + np + k];
-                if (k >= firstPhasic && !(here > 0 && left > 0 && right > 0)) continue;
                 const a = here - left, b = right - here;
-                if (a * b > 0) dW[w + k] = Math.abs(a) < Math.abs(b) ? a : b;
+                dW[w + k] = (here > 0 && left > 0 && right > 0 && a * b > 0)
+                    ? ((a < 0 ? -a : a) < (b < 0 ? -b : b) ? a : b) : 0;
             }
         }
+        return maxSpeed;
+    }
 
+    /**
+     * Advance the cell-centred primitive variables by half a time step using
+     * their slopes (the predictor of the MUSCL-Hancock scheme):
+     *
+     *     rho_t = -u rho_x - rho u_x        u_t = -u u_x - p_x / rho
+     *     p_t   = -u p_x - rho a^2 u_x      alpha_t = -u alpha_x
+     *
+     * and, for each phasic density, the same equation as rho.
+     */
+    musclPredict(dt) {
+        const nx = this.nx, np = this.nprim, M = this.numMaterials;
+        const W = this.W, dW = this.dW, rc2 = this.rc2;
+        const half = 0.5 * dt / this.dx;
+        const lastAlpha = 3 + M;
+        for (let i = 1; i < nx - 1; i++) {
+            const w = i * np;
+            const rho = W[w], u = W[w + 1];
+            const du = dW[w + 1], dp = dW[w + 2];
+            W[w] = rho - half * (u * dW[w] + rho * du);
+            W[w + 1] = u - half * (u * du + dp / rho);
+            W[w + 2] -= half * (u * dp + rc2[i] * du);
+            for (let k = 3; k < lastAlpha; k++) W[w + k] -= half * u * dW[w + k];
+            for (let k = lastAlpha; k < np; k++) {
+                if (W[w + k] > 0) W[w + k] -= half * (u * dW[w + k] + W[w + k] * du);
+            }
+        }
+    }
+
+    /** Second half of a second-order flux evaluation: HLLC between face states. */
+    musclFluxes() {
+        const nx = this.nx, nvar = this.nvar, M = this.numMaterials;
+        const flux = this.flux, tabulated = this.tabulated;
         const L = this.faceL, R = this.faceR;
         let maxWaveSpeed = 0;
+
         for (let i = 0; i <= nx; i++) {
             const f = i * nvar;
             if (i === 0) {
@@ -724,15 +794,25 @@ class EulerSolver {
 
             if (M > 0) {
                 const up = this._upwind === 0 ? L : R;
-                for (let m = 0; m < M; m++) this.flux[f + 3 + m] = up.alpha[m] * uFace;
-                if (this.tabulated) {
-                    const massFlux = this.flux[f];
-                    for (let m = 0; m < M; m++) this.flux[f + 3 + M + m] = massFlux * up.mass[m] / up.rho;
+                for (let m = 0; m < M; m++) flux[f + 3 + m] = up.alpha[m] * uFace;
+                if (tabulated) {
+                    const massFlux = flux[f] / up.rho;
+                    for (let m = 0; m < M; m++) flux[f + 3 + M + m] = massFlux * up.mass[m];
                 }
             }
             if (waveSpeed > maxWaveSpeed) maxWaveSpeed = waveSpeed;
         }
         return maxWaveSpeed;
+    }
+
+    /**
+     * Second-order fluxes for the Runge-Kutta integrators: limited linear
+     * reconstruction of the primitive variables in each cell, then the HLLC
+     * flux between the two face states.
+     */
+    computeFluxesMUSCL() {
+        this.musclPrepare();
+        return this.musclFluxes();
     }
 
     /**
@@ -759,9 +839,17 @@ class EulerSolver {
             if (nvar > 3) {
                 const lastAlpha = 3 + this.numMaterials;
                 const divU = this.faceVelocity[i + 1] - this.faceVelocity[i];
-                for (let k = 3; k < lastAlpha; k++) {
-                    const alpha = U[idx + k];
-                    Uout[idx + k] = alpha - lambda * (flux[fR + k] - flux[fL + k] - alpha * divU);
+                if (this.alphaAtHalfStep) {
+                    // MUSCL-Hancock: the non-conservative term uses the predicted value
+                    const w = i * this.nprim;
+                    for (let k = 3; k < lastAlpha; k++) {
+                        Uout[idx + k] = U[idx + k] - lambda * (flux[fR + k] - flux[fL + k] - this.W[w + k] * divU);
+                    }
+                } else {
+                    for (let k = 3; k < lastAlpha; k++) {
+                        const alpha = U[idx + k];
+                        Uout[idx + k] = alpha - lambda * (flux[fR + k] - flux[fL + k] - alpha * divU);
+                    }
                 }
                 // Partial densities are conserved
                 for (let k = lastAlpha; k < nvar; k++) {
@@ -772,9 +860,10 @@ class EulerSolver {
     }
 
     /**
-     * Update per-cell gas properties after a completed time step
+     * Remove round-off drift from the volume fractions after a time step:
+     * clamp to [0, 1] and renormalize.
      */
-    updateGasProperties() {
+    clampFractions() {
         if (this.interfaceMethod === 'mixed') {
             // Remove round-off drift: clamp to [0, 1] and renormalize
             const nvar = this.nvar;
@@ -799,6 +888,19 @@ class EulerSolver {
                 }
             }
         }
+    }
+
+    /** Bring the equation of state and the primitive variables up to date with U. */
+    refreshOutput() {
+        this.updateEOS(this.U);
+        this.updatePrimitives();
+    }
+
+    /**
+     * Update per-cell gas properties after a completed time step
+     */
+    updateGasProperties() {
+        this.clampFractions();
         this.updateEOS(this.U);
     }
 
@@ -811,8 +913,9 @@ class EulerSolver {
             const cellIdx = Math.floor(tracer.x / this.dx);
             const clampedIdx = Math.max(0, Math.min(this.nx - 1, cellIdx));
             
-            // Get velocity at tracer location
-            const velocity = this.u[clampedIdx];
+            // Velocity of the cell holding the tracer
+            const c = clampedIdx * this.nvar;
+            const velocity = this.U[c + 1] / Math.max(this.U[c], 1e-10);
             
             // Update position using forward Euler (good enough for tracers)
             tracer.x += velocity * this.dt;
@@ -901,7 +1004,10 @@ class EulerSolver {
         } finally {
             this.wallTime = (this.wallTime || 0) + (Date.now() - begin) / 1000;
         }
-        return this.t >= this.finalTime;
+        const done = this.t >= this.finalTime;
+        // Primitive variables are only kept current at snapshots and at the end
+        if (done) this.refreshOutput();
+        return done;
     }
 
     /**
